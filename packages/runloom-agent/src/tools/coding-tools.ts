@@ -141,7 +141,10 @@ function createSearchFilesTool(): ToolDefinition<
   };
 }
 
-function createWriteFileTool(): ToolDefinition<{ path: string; content: string }, { path: string; bytes: number }> {
+function createWriteFileTool(): ToolDefinition<
+  { path: string; content: string; expectedSha256?: string; allowDirty?: boolean },
+  { path: string; bytes: number; sha256Before?: string; sha256After: string }
+> {
   return {
     name: "fs.write",
     description: "Write a UTF-8 file inside the workspace.",
@@ -149,7 +152,9 @@ function createWriteFileTool(): ToolDefinition<{ path: string; content: string }
       type: "object",
       properties: {
         path: { type: "string" },
-        content: { type: "string" }
+        content: { type: "string" },
+        expectedSha256: { type: "string" },
+        allowDirty: { type: "boolean" }
       },
       required: ["path", "content"],
       additionalProperties: false
@@ -157,17 +162,29 @@ function createWriteFileTool(): ToolDefinition<{ path: string; content: string }
     permissions: ["filesystem.write"],
     async execute(input, context) {
       const target = await resolveWritableWorkspacePath(context.workspace, input.path);
+      const filePath = relative(context.workspace, target);
+      const existingContent = await readFile(target, "utf8").catch(() => undefined);
+      const sha256Before = existingContent === undefined ? undefined : sha256(existingContent);
+      if (input.expectedSha256 && input.expectedSha256 !== sha256Before) {
+        throw new Error(`fs.write expected sha256 ${input.expectedSha256}, but found ${sha256Before ?? "missing file"}.`);
+      }
+      await assertFileCanBeModified(context.workspace, filePath, {
+        allowDirty: input.allowDirty,
+        hasExpectedCurrentContent: Boolean(input.expectedSha256)
+      });
       await writeFile(target, input.content, "utf8");
       return {
-        path: relative(context.workspace, target),
-        bytes: Buffer.byteLength(input.content)
+        path: filePath,
+        bytes: Buffer.byteLength(input.content),
+        sha256Before,
+        sha256After: sha256(input.content)
       };
     }
   };
 }
 
 function createPatchFileTool(): ToolDefinition<
-  { path: string; before: string; after: string; expectedSha256?: string; replaceAll?: boolean },
+  { path: string; before: string; after: string; expectedSha256?: string; replaceAll?: boolean; allowDirty?: boolean },
   RunloomDiffSummary & { path: string; bytes: number; replacements: number; sha256Before: string; sha256After: string }
 > {
   return {
@@ -180,7 +197,8 @@ function createPatchFileTool(): ToolDefinition<
         before: { type: "string" },
         after: { type: "string" },
         expectedSha256: { type: "string" },
-        replaceAll: { type: "boolean" }
+        replaceAll: { type: "boolean" },
+        allowDirty: { type: "boolean" }
       },
       required: ["path", "before", "after"],
       additionalProperties: false
@@ -198,6 +216,10 @@ function createPatchFileTool(): ToolDefinition<
       if (input.expectedSha256 && input.expectedSha256 !== sha256Before) {
         throw new Error(`fs.patch expected sha256 ${input.expectedSha256}, but found ${sha256Before}.`);
       }
+      await assertFileCanBeModified(context.workspace, filePath, {
+        allowDirty: input.allowDirty,
+        hasExpectedCurrentContent: Boolean(input.expectedSha256)
+      });
 
       const occurrences = countOccurrences(content, input.before);
       if (occurrences === 0) {
@@ -473,6 +495,35 @@ function parseGitNumstatValue(value: string | undefined): number {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function assertFileCanBeModified(
+  workspace: string,
+  filePath: string,
+  options: { allowDirty?: boolean; hasExpectedCurrentContent?: boolean }
+): Promise<void> {
+  if (options.allowDirty || options.hasExpectedCurrentContent) {
+    return;
+  }
+
+  const dirty = await getGitStatusForPath(workspace, filePath);
+  if (dirty) {
+    throw new Error(
+      `Refusing to modify ${filePath} because it has uncommitted changes. Provide expectedSha256 or allowDirty to continue.`
+    );
+  }
+}
+
+async function getGitStatusForPath(workspace: string, filePath: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--", filePath], {
+      cwd: workspace,
+      windowsHide: true
+    });
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function countOccurrences(text: string, search: string): number {

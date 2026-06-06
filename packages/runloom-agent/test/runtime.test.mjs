@@ -612,6 +612,60 @@ test("file patch tool is guarded and applies exact replacements", async () => {
   }
 });
 
+test("file write and patch tools protect dirty user changes", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "runloom-dirty-file-"));
+  const filePath = join(workspace, "sample.txt");
+  const dirtyContent = "alpha\nuser change\n";
+
+  try {
+    await execFileAsync("git", ["init"], { cwd: workspace, windowsHide: true });
+    await execFileAsync("git", ["config", "user.email", "runloom@example.test"], { cwd: workspace, windowsHide: true });
+    await execFileAsync("git", ["config", "user.name", "Runloom Test"], { cwd: workspace, windowsHide: true });
+    await writeFile(filePath, "alpha\n");
+    await execFileAsync("git", ["add", "sample.txt"], { cwd: workspace, windowsHide: true });
+    await execFileAsync("git", ["commit", "-m", "initial"], { cwd: workspace, windowsHide: true });
+    await writeFile(filePath, dirtyContent);
+
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace,
+      apiKey: "",
+      approvalPolicy: {
+        scopes: {
+          "filesystem.write": "full_access"
+        }
+      }
+    });
+
+    const blockedPatch = await agent.executeTool("fs.patch", {
+      path: "sample.txt",
+      before: "alpha",
+      after: "beta"
+    });
+    const blockedWrite = await agent.executeTool("fs.write", {
+      path: "sample.txt",
+      content: "overwrite\n"
+    });
+    const controlledPatch = await agent.executeTool("fs.patch", {
+      path: "sample.txt",
+      before: "user change",
+      after: "controlled change",
+      expectedSha256: sha256(dirtyContent)
+    });
+
+    assert.equal(blockedPatch.status, "failed");
+    assert.match(blockedPatch.error, /uncommitted changes/);
+    assert.equal(blockedWrite.status, "failed");
+    assert.match(blockedWrite.error, /uncommitted changes/);
+    assert.equal(controlledPatch.status, "completed");
+    assert.equal(await readFile(filePath, "utf8"), "alpha\ncontrolled change\n");
+    await agent.close();
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("git diff tool reads a real workspace patch", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "runloom-git-diff-"));
 

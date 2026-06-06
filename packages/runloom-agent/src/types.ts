@@ -99,6 +99,7 @@ export interface RunResult {
   sessionId: string;
   status: "completed" | "failed" | "cancelled" | "waiting_approval";
   outputText: string;
+  approvalId?: string;
 }
 
 export interface ExecuteToolOptions {
@@ -175,7 +176,7 @@ export type ModelProviderEvent =
   | { type: "response.output_text.delta"; delta: string }
   | { type: "response.reasoning.delta"; delta: string }
   | { type: "response.tool_call.delta"; toolCallId: string; name?: string; argumentsDelta?: string }
-  | { type: "response.tool_call.completed"; toolCallId: string; name: string; arguments: unknown }
+  | { type: "response.tool_call.completed"; toolCallId: string; name: string; arguments: unknown; raw?: unknown }
   | { type: "response.structured_output.completed"; value: unknown }
   | { type: "response.usage"; usage: ModelUsage }
   | { type: "response.completed"; finishReason: ModelFinishReason }
@@ -194,6 +195,25 @@ export interface RunloomModelMessage {
   name?: string;
 }
 
+export type RunloomModelInputItem =
+  | {
+      type: "message";
+      role: "system" | "user" | "assistant";
+      content: RunloomContentPart[];
+    }
+  | {
+      type: "function_call";
+      toolCallId: string;
+      name: string;
+      arguments: unknown;
+      raw?: unknown;
+    }
+  | {
+      type: "function_call_output";
+      toolCallId: string;
+      output: string;
+    };
+
 export interface RunloomModelTool {
   name: string;
   description: string;
@@ -207,7 +227,8 @@ export interface RunloomResponseFormat {
 
 export interface ModelRequest {
   model: string;
-  messages: RunloomModelMessage[];
+  input?: RunloomModelInputItem[];
+  messages?: RunloomModelMessage[];
   tools?: RunloomModelTool[];
   toolChoice?: "auto" | "none" | { name: string };
   responseFormat?: RunloomResponseFormat;

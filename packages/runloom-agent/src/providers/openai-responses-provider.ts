@@ -5,7 +5,10 @@ import type {
   ModelRequest,
   ModelUsage,
   NormalizedProviderError,
-  RunloomModelMessage
+  RunloomContentPart,
+  RunloomModelInputItem,
+  RunloomModelMessage,
+  RunloomModelTool
 } from "../types.js";
 
 export interface OpenAIResponsesProviderOptions {
@@ -48,22 +51,14 @@ export class OpenAIResponsesProvider implements ModelProvider {
       return;
     }
 
+    const payload = buildResponsesPayload(request, context);
     const response = await fetch(`${this.baseUrl}/responses`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        model: request.model,
-        input: messagesToInput(request.messages),
-        stream: false,
-        metadata: {
-          ...request.metadata,
-          run_id: context.runId,
-          session_id: context.sessionId
-        }
-      }),
+      body: JSON.stringify(payload),
       signal: context.signal
     });
 
@@ -88,6 +83,11 @@ export class OpenAIResponsesProvider implements ModelProvider {
       };
     }
 
+    const toolCalls = extractToolCalls(json);
+    for (const toolCall of toolCalls) {
+      yield toolCall;
+    }
+
     const usage = extractUsage(json);
     if (usage) {
       yield {
@@ -98,25 +98,151 @@ export class OpenAIResponsesProvider implements ModelProvider {
 
     yield {
       type: "response.completed",
-      finishReason: "stop"
+      finishReason: toolCalls.length > 0 ? "tool_calls" : "stop"
     };
   }
 }
 
-function messagesToInput(messages: RunloomModelMessage[]): string {
-  return messages
-    .map((message) => {
-      const content = message.content
-        .map((part) => {
-          if (part.type === "text") {
-            return part.text ?? "";
-          }
-          return `[redacted: ${part.reason ?? "unknown"}]`;
-        })
-        .join("");
-      return `${message.role.toUpperCase()}:\n${content}`;
+function buildResponsesPayload(request: ModelRequest, context: ModelProviderContext): Record<string, unknown> {
+  const { input, instructions } = buildResponsesInput(request);
+  const payload: Record<string, unknown> = {
+    model: request.model,
+    input,
+    stream: false,
+    metadata: {
+      ...request.metadata,
+      run_id: context.runId,
+      session_id: context.sessionId
+    }
+  };
+
+  if (instructions) {
+    payload.instructions = instructions;
+  }
+  if (request.tools?.length) {
+    payload.tools = request.tools.map(toolToResponsesTool);
+  }
+  if (request.toolChoice) {
+    payload.tool_choice = mapToolChoice(request.toolChoice);
+  }
+  if (typeof request.maxOutputTokens === "number") {
+    payload.max_output_tokens = request.maxOutputTokens;
+  }
+  if (typeof request.temperature === "number") {
+    payload.temperature = request.temperature;
+  }
+
+  return payload;
+}
+
+function buildResponsesInput(request: ModelRequest): { input: unknown; instructions?: string } {
+  if (request.input) {
+    return inputItemsToResponsesInput(request.input);
+  }
+  return messagesToResponsesInput(request.messages ?? []);
+}
+
+function inputItemsToResponsesInput(items: RunloomModelInputItem[]): { input: unknown; instructions?: string } {
+  const input: unknown[] = [];
+  const instructions: string[] = [];
+
+  for (const item of items) {
+    if (item.type === "message") {
+      const text = contentToText(item.content);
+      if (item.role === "system") {
+        instructions.push(text);
+      } else {
+        input.push({ role: item.role, content: text });
+      }
+      continue;
+    }
+
+    if (item.type === "function_call") {
+      input.push(functionCallToResponsesInput(item));
+      continue;
+    }
+
+    input.push({
+      type: "function_call_output",
+      call_id: item.toolCallId,
+      output: item.output
+    });
+  }
+
+  return {
+    input: input.length > 0 ? input : "",
+    instructions: instructions.filter(Boolean).join("\n\n") || undefined
+  };
+}
+
+function messagesToResponsesInput(messages: RunloomModelMessage[]): { input: unknown; instructions?: string } {
+  const input: unknown[] = [];
+  const instructions: string[] = [];
+
+  for (const message of messages) {
+    const text = contentToText(message.content);
+    if (message.role === "system") {
+      instructions.push(text);
+      continue;
+    }
+    if (message.role === "tool" && message.toolCallId) {
+      input.push({
+        type: "function_call_output",
+        call_id: message.toolCallId,
+        output: text
+      });
+      continue;
+    }
+    input.push({ role: message.role, content: text });
+  }
+
+  return {
+    input: input.length > 0 ? input : "",
+    instructions: instructions.filter(Boolean).join("\n\n") || undefined
+  };
+}
+
+function contentToText(content: RunloomContentPart[]): string {
+  return content
+    .map((part) => {
+      if (part.type === "text") {
+        return part.text ?? "";
+      }
+      return `[redacted: ${part.reason ?? "unknown"}]`;
     })
-    .join("\n\n");
+    .join("");
+}
+
+function toolToResponsesTool(tool: RunloomModelTool): Record<string, unknown> {
+  return {
+    type: "function",
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.inputSchema,
+    strict: false
+  };
+}
+
+function mapToolChoice(toolChoice: ModelRequest["toolChoice"]): unknown {
+  if (toolChoice === "auto" || toolChoice === "none") {
+    return toolChoice;
+  }
+  return {
+    type: "function",
+    name: toolChoice?.name
+  };
+}
+
+function functionCallToResponsesInput(item: Extract<RunloomModelInputItem, { type: "function_call" }>): unknown {
+  if (isRecord(item.raw)) {
+    return item.raw;
+  }
+  return {
+    type: "function_call",
+    call_id: item.toolCallId,
+    name: item.name,
+    arguments: stringifyArguments(item.arguments)
+  };
 }
 
 function extractOutputText(json: Record<string, unknown>): string {
@@ -140,6 +266,33 @@ function extractOutputText(json: Record<string, unknown>): string {
   }
 
   return chunks.join("");
+}
+
+function extractToolCalls(json: Record<string, unknown>): ModelProviderEvent[] {
+  const output = Array.isArray(json.output) ? json.output : [];
+  const calls: ModelProviderEvent[] = [];
+
+  for (const item of output) {
+    if (!isRecord(item) || item.type !== "function_call") {
+      continue;
+    }
+
+    const callId = stringValue(item.call_id) ?? stringValue(item.id);
+    const name = stringValue(item.name);
+    if (!callId || !name) {
+      continue;
+    }
+
+    calls.push({
+      type: "response.tool_call.completed",
+      toolCallId: callId,
+      name,
+      arguments: parseArguments(item.arguments),
+      raw: item
+    });
+  }
+
+  return calls;
 }
 
 function extractUsage(json: Record<string, unknown>): ModelUsage | undefined {
@@ -183,4 +336,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseArguments(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value ?? {};
+  }
+  if (!value.trim()) {
+    return {};
+  }
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function stringifyArguments(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value ?? {});
 }

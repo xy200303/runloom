@@ -15,6 +15,8 @@ import type {
   ExecuteToolOptions,
   ModelProvider,
   ModelProviderEvent,
+  RunloomModelInputItem,
+  RunloomModelTool,
   RunResult,
   RunloomAgent,
   RunloomEvent,
@@ -28,6 +30,21 @@ import type {
   ToolExecutionResult,
   Unsubscribe
 } from "../types.js";
+
+const MAX_MODEL_TOOL_STEPS = 8;
+
+interface ModelToolCall {
+  toolCallId: string;
+  name: string;
+  arguments: unknown;
+  raw?: unknown;
+}
+
+interface ModelLoopResult {
+  status: "completed" | "waiting_approval";
+  outputText: string;
+  approvalId?: string;
+}
 
 export class DefaultRunloomAgent implements RunloomAgent {
   private readonly workspace: string;
@@ -92,7 +109,29 @@ export class DefaultRunloomAgent implements RunloomAgent {
       }
 
       const provider = this.getActiveProvider();
-      const outputText = await this.runModel(provider, runId, session.id, text, buildWorkspaceContext(inspection), options.signal);
+      const modelResult = await this.runModel(provider, runId, session.id, text, buildWorkspaceContext(inspection), options.signal);
+
+      if (modelResult.status === "waiting_approval") {
+        const blockedTodo: RunloomTodoItem = {
+          ...todo,
+          status: "blocked",
+          evidence: modelResult.approvalId ? [`approval:${modelResult.approvalId}`] : undefined,
+          updatedAt: new Date().toISOString()
+        };
+        this.emit("todo.updated", "runtime", runId, session.id, { items: [blockedTodo] });
+        this.emit("run.waiting_approval", "runtime", runId, session.id, {
+          outputText: modelResult.outputText,
+          approvalId: modelResult.approvalId
+        });
+        this.store.touchSession(session.id);
+        return {
+          runId,
+          sessionId: session.id,
+          status: "waiting_approval",
+          outputText: modelResult.outputText,
+          approvalId: modelResult.approvalId
+        };
+      }
 
       const completedTodo: RunloomTodoItem = {
         ...todo,
@@ -101,7 +140,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       };
       this.emit("todo.updated", "runtime", runId, session.id, { items: [completedTodo] });
       this.emit("run.completed", "runtime", runId, session.id, {
-        outputText
+        outputText: modelResult.outputText
       });
       this.store.touchSession(session.id);
 
@@ -109,7 +148,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         runId,
         sessionId: session.id,
         status: "completed",
-        outputText
+        outputText: modelResult.outputText
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -211,56 +250,144 @@ export class DefaultRunloomAgent implements RunloomAgent {
     userText: string,
     workspaceContext: string,
     signal?: AbortSignal
-  ): Promise<string> {
+  ): Promise<ModelLoopResult> {
     const output: string[] = [];
     const model = this.options.model ?? "gpt-4.1";
-
-    const events = provider.createResponse(
+    const input: RunloomModelInputItem[] = [
       {
-        model,
-        messages: [
+        type: "message",
+        role: "system",
+        content: [
           {
-            role: "system",
-            content: [
-              {
-                type: "text",
-                text:
-                  "You are Runloom, a professional local coding agent. Be concise, cite local evidence, protect user changes, and summarize verification."
-              }
-            ]
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `${workspaceContext}\n\nUser task:\n${userText}`
-              }
-            ]
+            type: "text",
+            text:
+              "You are Runloom, a professional local coding agent. Be concise, cite local evidence, protect user changes, and summarize verification."
           }
-        ],
-        metadata: {
-          runtime: "runloom"
-        }
+        ]
       },
       {
-        runId,
-        sessionId,
-        signal
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: `${workspaceContext}\n\nUser task:\n${userText}`
+          }
+        ]
       }
-    );
+    ];
+    const tools = this.modelTools();
 
-    for await (const event of events) {
-      this.forwardProviderEvent(event, runId, sessionId);
-      if (event.type === "response.output_text.delta") {
-        output.push(event.delta);
+    for (let step = 0; step < MAX_MODEL_TOOL_STEPS; step += 1) {
+      const toolCalls: ModelToolCall[] = [];
+      const events = provider.createResponse(
+        {
+          model,
+          input,
+          tools,
+          toolChoice: tools.length > 0 ? "auto" : "none",
+          metadata: {
+            runtime: "runloom"
+          }
+        },
+        {
+          runId,
+          sessionId,
+          signal
+        }
+      );
+
+      for await (const event of events) {
+        this.forwardProviderEvent(event, runId, sessionId);
+        if (event.type === "response.output_text.delta") {
+          output.push(event.delta);
+        }
+        if (event.type === "response.tool_call.completed") {
+          toolCalls.push({
+            toolCallId: event.toolCallId,
+            name: event.name,
+            arguments: event.arguments,
+            raw: event.raw
+          });
+        }
+        if (event.type === "response.failed") {
+          throw new Error(event.error.message);
+        }
       }
-      if (event.type === "response.failed") {
-        throw new Error(event.error.message);
+
+      if (toolCalls.length === 0) {
+        return {
+          status: "completed",
+          outputText: output.join("")
+        };
+      }
+
+      for (const toolCall of toolCalls) {
+        input.push({
+          type: "function_call",
+          toolCallId: toolCall.toolCallId,
+          name: toolCall.name,
+          arguments: toolCall.arguments,
+          raw: toolCall.raw
+        });
+
+        const result = await this.executeModelToolCall(toolCall, runId, sessionId, signal);
+        if (result.status === "waiting_approval") {
+          return {
+            status: "waiting_approval",
+            outputText: output.join(""),
+            approvalId: result.approvalId
+          };
+        }
+
+        input.push({
+          type: "function_call_output",
+          toolCallId: toolCall.toolCallId,
+          output: stringifyToolResult(result)
+        });
       }
     }
 
-    return output.join("");
+    throw new Error(`Model requested tools for more than ${MAX_MODEL_TOOL_STEPS} steps.`);
+  }
+
+  private modelTools(): RunloomModelTool[] {
+    return [...this.tools.values()].map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema
+    }));
+  }
+
+  private async executeModelToolCall(
+    toolCall: ModelToolCall,
+    runId: string,
+    sessionId: string,
+    signal?: AbortSignal
+  ): Promise<ToolExecutionResult> {
+    const tool = this.tools.get(toolCall.name);
+    if (!tool) {
+      this.emit("tool.call.failed", "tool", runId, sessionId, {
+        toolName: toolCall.name,
+        error: `Tool not found: ${toolCall.name}`,
+        durationMs: 0
+      });
+      return {
+        toolName: toolCall.name,
+        runId,
+        sessionId,
+        status: "failed",
+        error: `Tool not found: ${toolCall.name}`,
+        durationMs: 0
+      };
+    }
+
+    return this.toolExecutor.execute(tool, toolCall.arguments, {
+      workspace: this.workspace,
+      runId,
+      sessionId,
+      signal
+    });
   }
 
   private forwardProviderEvent(event: ModelProviderEvent, runId: string, sessionId: string): void {
@@ -291,4 +418,20 @@ export class DefaultRunloomAgent implements RunloomAgent {
       payload
     });
   }
+}
+
+function stringifyToolResult(result: ToolExecutionResult): string {
+  const payload =
+    result.status === "completed"
+      ? {
+          status: result.status,
+          output: result.output
+        }
+      : {
+          status: result.status,
+          error: result.error ?? `Tool ${result.toolName} did not complete.`
+        };
+
+  const json = JSON.stringify(payload);
+  return json.length > 120_000 ? `${json.slice(0, 120_000)}...[truncated]` : json;
 }

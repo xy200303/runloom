@@ -102,6 +102,48 @@ export interface RunResult {
   approvalId?: string;
 }
 
+export type RunloomTaskType =
+  | "frontend_design"
+  | "go_development"
+  | "prototype_design"
+  | "code_review"
+  | "test_fix"
+  | "general";
+
+export interface ModelRouteMatcher {
+  taskType?: RunloomTaskType | string;
+  language?: string;
+  workspacePattern?: string;
+}
+
+export interface ModelRouteConfig {
+  when: ModelRouteMatcher;
+  model: string;
+  profile?: string;
+}
+
+export interface RunloomModelConfig {
+  default?: string;
+  profiles?: Record<string, string>;
+  routes?: ModelRouteConfig[];
+}
+
+export interface RunloomConfig {
+  model?: RunloomModelConfig;
+}
+
+export interface ModelSelectionResult {
+  providerId: string;
+  model: string;
+  modelRef: string;
+  source: "explicit" | "profile" | "route" | "default" | "fallback";
+  reason: string;
+  profile?: string;
+  taskType?: string;
+  language?: string;
+  routeIndex?: number;
+}
+
 export interface ExecuteToolOptions {
   runId?: string;
   sessionId?: string;
@@ -128,6 +170,10 @@ export interface ToolSummary {
 
 export interface SubmitOptions {
   sessionId?: string;
+  model?: string;
+  profile?: string;
+  taskType?: RunloomTaskType | string;
+  language?: string;
   signal?: AbortSignal;
 }
 
@@ -142,6 +188,10 @@ export interface ListSessionsOptions {
 
 export interface RunloomInput {
   text: string;
+  model?: string;
+  profile?: string;
+  taskType?: RunloomTaskType | string;
+  language?: string;
 }
 
 export interface ModelCapabilities {

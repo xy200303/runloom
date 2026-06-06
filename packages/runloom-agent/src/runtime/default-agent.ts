@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { FileApprovalPolicyStore } from "../approvals/file-policy-store.js";
 import { applyApprovalPolicyPatch, createDefaultApprovalPolicy } from "../approvals/policy.js";
 import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-summary.js";
+import { loadRunloomConfig, selectModel } from "../config/runloom-config.js";
 import { RunloomEventBus } from "../events/event-bus.js";
 import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
@@ -14,8 +15,10 @@ import type {
   ApprovalPolicyPatch,
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
+  ModelSelectionResult,
   ModelProvider,
   ModelProviderEvent,
+  RunloomConfig,
   RunloomModelInputItem,
   RunloomModelTool,
   RunResult,
@@ -34,6 +37,9 @@ import type {
 } from "../types.js";
 
 const MAX_MODEL_TOOL_STEPS = 8;
+const PROVIDER_ALIASES: Record<string, string> = {
+  openai: "openai-responses"
+};
 
 interface ModelToolCall {
   toolCallId: string;
@@ -48,6 +54,14 @@ interface ModelLoopResult {
   approvalId?: string;
 }
 
+interface NormalizedSubmitInput {
+  text: string;
+  model?: string;
+  profile?: string;
+  taskType?: string;
+  language?: string;
+}
+
 export class DefaultRunloomAgent implements RunloomAgent {
   private readonly workspace: string;
   private readonly bus = new RunloomEventBus();
@@ -55,6 +69,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly providers = new Map<string, ModelProvider>();
   private readonly tools = new Map<string, ToolDefinition>();
   private readonly approvalPolicyStore?: FileApprovalPolicyStore;
+  private readonly config: RunloomConfig;
   private readonly toolExecutor: ToolExecutor;
   private approvalPolicy: ApprovalPolicyConfig;
   private sequence = 0;
@@ -63,6 +78,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
     this.workspace = resolve(options.workspace);
     this.approvalPolicyStore = options.stateDir ? new FileApprovalPolicyStore(options.stateDir, this.workspace) : undefined;
     this.approvalPolicy = this.loadInitialApprovalPolicy(options.approvalPolicy);
+    this.config = loadRunloomConfig({
+      stateDir: options.stateDir,
+      workspace: this.workspace
+    });
     this.toolExecutor = new ToolExecutor({
       workspace: this.workspace,
       getApprovalPolicy: () => this.approvalPolicy,
@@ -87,7 +106,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async submit(input: string | RunloomInput, options: SubmitOptions = {}): Promise<RunResult> {
-    const text = typeof input === "string" ? input : input.text;
+    const request = normalizeSubmitInput(input, options, this.options.model);
+    const text = request.text;
     const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
     const runId = `run_${randomUUID()}`;
 
@@ -112,8 +132,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
         this.emit("coding.git.status", "coding", runId, session.id, inspection.summary.git);
       }
 
-      const provider = this.getActiveProvider();
-      const modelResult = await this.runModel(provider, runId, session.id, text, buildWorkspaceContext(inspection), options.signal);
+      const modelSelection = this.selectModelForRun(request);
+      this.emit("model.selection.resolved", "runtime", runId, session.id, modelSelection);
+
+      const provider = this.getProvider(modelSelection.providerId);
+      const modelResult = await this.runModel(
+        provider,
+        modelSelection,
+        runId,
+        session.id,
+        text,
+        buildWorkspaceContext(inspection),
+        options.signal
+      );
 
       if (modelResult.status === "waiting_approval") {
         const blockedTodo: RunloomTodoItem = {
@@ -261,6 +292,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   private async runModel(
     provider: ModelProvider,
+    modelSelection: ModelSelectionResult,
     runId: string,
     sessionId: string,
     userText: string,
@@ -268,7 +300,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
     signal?: AbortSignal
   ): Promise<ModelLoopResult> {
     const output: string[] = [];
-    const model = this.options.model ?? "gpt-4.1";
     const input: RunloomModelInputItem[] = [
       {
         type: "message",
@@ -298,12 +329,15 @@ export class DefaultRunloomAgent implements RunloomAgent {
       const toolCalls: ModelToolCall[] = [];
       const events = provider.createResponse(
         {
-          model,
+          model: modelSelection.model,
           input,
           tools,
           toolChoice: tools.length > 0 ? "auto" : "none",
           metadata: {
-            runtime: "runloom"
+            runtime: "runloom",
+            model_provider: modelSelection.providerId,
+            model_source: modelSelection.source,
+            model_reason: modelSelection.reason
           }
         },
         {
@@ -418,8 +452,29 @@ export class DefaultRunloomAgent implements RunloomAgent {
     return provider;
   }
 
+  private getProvider(providerId: string): ModelProvider {
+    const provider = this.providers.get(providerId);
+    if (!provider) {
+      throw new Error(`Model provider is not registered: ${providerId}`);
+    }
+    return provider;
+  }
+
   private registerProviderSync(provider: ModelProvider): void {
     this.providers.set(provider.id, provider);
+  }
+
+  private selectModelForRun(input: NormalizedSubmitInput): ModelSelectionResult {
+    return selectModel(this.config, {
+      explicitModel: input.model,
+      profile: input.profile,
+      taskType: input.taskType,
+      language: input.language,
+      text: input.text,
+      workspace: this.workspace,
+      defaultProviderId: this.getActiveProvider().id,
+      providerAliases: PROVIDER_ALIASES
+    });
   }
 
   private loadInitialApprovalPolicy(patch?: ApprovalPolicyPatch): ApprovalPolicyConfig {
@@ -462,4 +517,28 @@ function stringifyToolResult(result: ToolExecutionResult): string {
 
   const json = JSON.stringify(payload);
   return json.length > 120_000 ? `${json.slice(0, 120_000)}...[truncated]` : json;
+}
+
+function normalizeSubmitInput(
+  input: string | RunloomInput,
+  options: SubmitOptions,
+  defaultModel?: string
+): NormalizedSubmitInput {
+  if (typeof input === "string") {
+    return {
+      text: input,
+      model: options.model ?? defaultModel,
+      profile: options.profile,
+      taskType: options.taskType,
+      language: options.language
+    };
+  }
+
+  return {
+    text: input.text,
+    model: options.model ?? input.model ?? defaultModel,
+    profile: options.profile ?? input.profile,
+    taskType: options.taskType ?? input.taskType,
+    language: options.language ?? input.language
+  };
 }

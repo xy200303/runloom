@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -57,6 +57,154 @@ test("approval policy persists when a state directory is configured", async () =
     assert.equal(policy.defaultMode, "auto_decide");
     assert.equal(policy.scopes.shell, "full_access");
     await secondAgent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("model routes select providers from global runloom config", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-config-"));
+
+  try {
+    await writeFile(
+      join(stateDir, "config.json"),
+      JSON.stringify({
+        model: {
+          default: "openai:gpt-default",
+          profiles: {
+            frontend_design: "kimi:kimi-design"
+          },
+          routes: [
+            {
+              when: { language: "go" },
+              model: "go:go-code"
+            },
+            {
+              when: { taskType: "prototype_design" },
+              model: "proto:proto-model"
+            }
+          ]
+        }
+      })
+    );
+
+    const openai = new RecordingProvider("openai-responses");
+    const kimi = new RecordingProvider("kimi");
+    const go = new RecordingProvider("go");
+    const proto = new RecordingProvider("proto");
+    const agent = await createRunloomAgent({
+      provider: openai,
+      workspace: process.cwd(),
+      stateDir
+    });
+    await agent.registerProvider(kimi);
+    await agent.registerProvider(go);
+    await agent.registerProvider(proto);
+
+    const selections = [];
+    agent.subscribe((event) => {
+      if (event.type === "model.selection.resolved") {
+        selections.push(event.payload);
+      }
+    });
+
+    const frontendResult = await agent.submit({
+      text: "请做一个前端设计任务",
+      profile: "frontend_design"
+    });
+    assert.equal(frontendResult.status, "completed");
+    assert.equal(kimi.requests[0].model, "kimi-design");
+    assert.equal(selections.at(-1).providerId, "kimi");
+    assert.equal(selections.at(-1).source, "profile");
+
+    const goResult = await agent.submit("请完成一个 Go 开发任务");
+    assert.equal(goResult.status, "completed");
+    assert.equal(go.requests[0].model, "go-code");
+    assert.equal(selections.at(-1).providerId, "go");
+    assert.equal(selections.at(-1).source, "route");
+
+    const prototypeResult = await agent.submit({
+      text: "做一个产品原型",
+      taskType: "prototype_design"
+    });
+    assert.equal(prototypeResult.status, "completed");
+    assert.equal(proto.requests[0].model, "proto-model");
+    assert.equal(selections.at(-1).providerId, "proto");
+    assert.equal(selections.at(-1).source, "route");
+
+    await agent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("workspace runloom config overrides global model config", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-config-"));
+  const workspace = await mkdtemp(join(tmpdir(), "runloom-workspace-"));
+
+  try {
+    await writeFile(
+      join(stateDir, "config.json"),
+      JSON.stringify({
+        model: {
+          default: "go:global-default"
+        }
+      })
+    );
+    await mkdir(join(workspace, ".runloom"));
+    await writeFile(
+      join(workspace, ".runloom", "config.json"),
+      JSON.stringify({
+        model: {
+          default: "kimi:workspace-default"
+        }
+      })
+    );
+
+    const go = new RecordingProvider("go");
+    const kimi = new RecordingProvider("kimi");
+    const agent = await createRunloomAgent({
+      provider: go,
+      workspace,
+      stateDir
+    });
+    await agent.registerProvider(kimi);
+
+    const result = await agent.submit("普通开发任务");
+
+    assert.equal(result.status, "completed");
+    assert.equal(kimi.requests[0].model, "workspace-default");
+    assert.equal(go.requests.length, 0);
+    await agent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("runloom config rejects secret-like fields", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-config-"));
+
+  try {
+    await writeFile(
+      join(stateDir, "config.json"),
+      JSON.stringify({
+        apiKey: "not-allowed",
+        model: {
+          default: "openai:gpt-4.1"
+        }
+      })
+    );
+
+    await assert.rejects(
+      () =>
+        createRunloomAgent({
+          provider: new RecordingProvider("openai-responses"),
+          workspace: process.cwd(),
+          stateDir
+        }),
+      /secret-like field 'apiKey'/
+    );
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }
@@ -335,3 +483,23 @@ test("shell verification is governed by approval policy", async () => {
   assert.ok(autoDecision.approvalId);
   await autoDecideAgent.close();
 });
+
+class RecordingProvider {
+  protocol = "custom";
+  capabilities = {
+    streaming: false,
+    tools: true
+  };
+  requests = [];
+
+  constructor(id) {
+    this.id = id;
+  }
+
+  async *createResponse(request) {
+    this.requests.push(request);
+    yield { type: "response.created", responseId: `resp_${this.id}` };
+    yield { type: "response.output_text.delta", delta: `${this.id}:${request.model}` };
+    yield { type: "response.completed", finishReason: "stop" };
+  }
+}

@@ -131,7 +131,7 @@
 - [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态和 todo；仍需完整 activity panel 与事件回放。
 - [ ] approval 弹窗。
 - [ ] `/permissions` 权限审批设置面板。
-- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/quit`；仍需 `/skills`、`/mcp`、`/resume`。
+- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/skills`、`/mcp`、`/quit`；仍需 `/resume`。
 - [ ] 事件回放和滚动。
 
 验收标准：
@@ -157,6 +157,8 @@
 
 ## Phase 6：Skills 与 MCP
 
+- [x] 定义 Skills/MCP public list/register API，供 TUI、Web、VSCode 等 host 横向复用。
+- [x] TUI 支持 `/skills`、`/mcp` 展示当前真实注册状态；默认不注入产品 mock 数据。
 - [ ] Skill manifest schema。
 - [ ] 加载 `~/.runloom/skills/installed` 和 `generated`。
 - [ ] skill 触发选择器。

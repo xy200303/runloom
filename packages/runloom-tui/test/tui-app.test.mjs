@@ -51,6 +51,31 @@ test("approval command updates scope and default modes", async () => {
         }
       ];
     },
+    async listSkills() {
+      return [
+        {
+          name: "typescript-code-review",
+          version: "0.1.0",
+          description: "Review TypeScript changes.",
+          enabled: true,
+          source: "registered",
+          requiredTools: ["fs.read"]
+        }
+      ];
+    },
+    async listMcpServers() {
+      return [
+        {
+          name: "workspace",
+          enabled: true,
+          transport: "stdio",
+          status: "connected",
+          tools: ["fs.read"],
+          resources: 1,
+          prompts: 0
+        }
+      ];
+    },
     async listSessions() {
       return sessions;
     },
@@ -137,6 +162,8 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/approval shell full_access");
   await app.runCommand("/approval default auto_decide");
   await app.runCommand("/tools");
+  await app.runCommand("/skills");
+  await app.runCommand("/mcp");
   await app.runCommand("/git");
   await app.runCommand("/session");
   await app.runCommand("/session list");
@@ -180,6 +207,8 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Approval mode for shell set to full_access/);
   assert.match(text, /Approval default mode set to auto_decide/);
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
+  assert.match(text, /typescript-code-review@0\.1\.0 enabled source=registered tools=fs\.read/);
+  assert.match(text, /workspace enabled transport=stdio status=connected tools=fs\.read resources=1 prompts=0/);
   assert.match(text, /\[git\] main \(clean\)/);
   assert.match(text, /Session: ses_tool/);
   assert.match(text, /Sessions:/);

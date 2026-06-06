@@ -168,6 +168,27 @@ export interface ToolSummary {
   permissions: PermissionScope[];
 }
 
+export interface RunloomSkillSummary {
+  name: string;
+  description: string;
+  enabled: boolean;
+  source: "installed" | "generated" | "workspace" | "registered";
+  version?: string;
+  triggers?: string[];
+  requiredTools?: string[];
+}
+
+export interface McpServerSummary {
+  name: string;
+  enabled: boolean;
+  transport: "stdio" | "http" | "sse" | "custom";
+  status: "disconnected" | "connecting" | "connected" | "error";
+  tools?: string[];
+  resources?: number;
+  prompts?: number;
+  error?: string;
+}
+
 export interface SubmitOptions {
   sessionId?: string;
   model?: string;
@@ -402,6 +423,10 @@ export interface RunloomAgent {
   submit(input: string | RunloomInput, options?: SubmitOptions): Promise<RunResult>;
   executeTool<TOutput = unknown>(name: string, input: unknown, options?: ExecuteToolOptions): Promise<ToolExecutionResult<TOutput>>;
   listTools(): Promise<ToolSummary[]>;
+  listSkills(): Promise<RunloomSkillSummary[]>;
+  registerSkill(skill: RunloomSkillSummary): Promise<void>;
+  listMcpServers(): Promise<McpServerSummary[]>;
+  registerMcpServer(server: McpServerSummary): Promise<void>;
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe;
   listSessions(options?: ListSessionsOptions): Promise<RunloomSession[]>;
   getSession(sessionId: string): Promise<RunloomSession>;

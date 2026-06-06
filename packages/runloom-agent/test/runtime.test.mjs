@@ -522,6 +522,46 @@ test("built-in tools can be listed for host adapters", async () => {
   await agent.close();
 });
 
+test("skills and MCP servers can be registered without product mock data", async () => {
+  const agent = await createRunloomAgent({
+    provider: "openai-responses",
+    model: "gpt-4.1",
+    workspace: process.cwd(),
+    apiKey: ""
+  });
+
+  assert.deepEqual(await agent.listSkills(), []);
+  assert.deepEqual(await agent.listMcpServers(), []);
+
+  await agent.registerSkill({
+    name: "typescript-code-review",
+    version: "0.1.0",
+    description: "Review TypeScript changes.",
+    enabled: true,
+    source: "registered",
+    triggers: ["review"],
+    requiredTools: ["fs.read", "git.diff"]
+  });
+  await agent.registerMcpServer({
+    name: "workspace",
+    enabled: true,
+    transport: "stdio",
+    status: "disconnected",
+    tools: ["fs.read"],
+    resources: 0,
+    prompts: 0
+  });
+
+  const skills = await agent.listSkills();
+  const servers = await agent.listMcpServers();
+
+  assert.equal(skills[0].name, "typescript-code-review");
+  assert.deepEqual(skills[0].requiredTools, ["fs.read", "git.diff"]);
+  assert.equal(servers[0].name, "workspace");
+  assert.equal(servers[0].transport, "stdio");
+  await agent.close();
+});
+
 test("shell verification is governed by approval policy", async () => {
   const defaultAgent = await createRunloomAgent({
     provider: "openai-responses",

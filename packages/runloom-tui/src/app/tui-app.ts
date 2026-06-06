@@ -5,10 +5,12 @@ import { APPROVAL_MODES, PERMISSION_SCOPES } from "runloom-agent";
 import type {
   ApprovalMode,
   ApprovalPolicyConfig,
+  McpServerSummary,
   PermissionScope,
   RunloomAgent,
   RunloomEvent,
   RunloomSession,
+  RunloomSkillSummary,
   RunloomTodoItem,
   ToolSummary,
   ToolExecutionResult,
@@ -210,6 +212,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /diff          Show current git diff",
           "  /review        Enable code review mode",
           "  /stop          Stop the active run",
+          "  /skills        List registered skills",
+          "  /mcp           List MCP servers",
           "  /git           Show git status",
           "  /tests         Run verification command",
           "  /quit          Exit"
@@ -252,6 +256,18 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     if (command === "/stop") {
       await this.handleStopCommand();
+      return;
+    }
+
+    if (command === "/skills") {
+      const skills = await this.options.agent.listSkills();
+      output.write(formatSkills(skills));
+      return;
+    }
+
+    if (command === "/mcp") {
+      const servers = await this.options.agent.listMcpServers();
+      output.write(formatMcpServers(servers));
       return;
     }
 
@@ -556,6 +572,35 @@ function formatTools(tools: ToolSummary[]): string {
   for (const tool of tools) {
     const permissions = tool.permissions.length ? tool.permissions.join(", ") : "none";
     lines.push(`  ${tool.name} - ${tool.description} [${permissions}]`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatSkills(skills: RunloomSkillSummary[]): string {
+  if (skills.length === 0) {
+    return "Skills: (none registered)\n";
+  }
+  const lines = ["Skills:"];
+  for (const skill of skills) {
+    const state = skill.enabled ? "enabled" : "disabled";
+    const version = skill.version ? `@${skill.version}` : "";
+    const requiredTools = skill.requiredTools?.length ? ` tools=${skill.requiredTools.join(",")}` : "";
+    lines.push(`  ${skill.name}${version} ${state} source=${skill.source}${requiredTools} - ${skill.description}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatMcpServers(servers: McpServerSummary[]): string {
+  if (servers.length === 0) {
+    return "MCP servers: (none registered)\n";
+  }
+  const lines = ["MCP servers:"];
+  for (const server of servers) {
+    const state = server.enabled ? "enabled" : "disabled";
+    const tools = server.tools?.length ? ` tools=${server.tools.join(",")}` : "";
+    const inventory = `resources=${server.resources ?? 0} prompts=${server.prompts ?? 0}`;
+    const error = server.error ? ` error=${server.error}` : "";
+    lines.push(`  ${server.name} ${state} transport=${server.transport} status=${server.status}${tools} ${inventory}${error}`);
   }
   return `${lines.join("\n")}\n`;
 }

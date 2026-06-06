@@ -15,6 +15,7 @@ import type {
   ApprovalPolicyPatch,
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
+  McpServerSummary,
   ModelSelectionResult,
   ModelProvider,
   ModelProviderEvent,
@@ -27,6 +28,7 @@ import type {
   RunloomEventListener,
   RunloomInput,
   RunloomSession,
+  RunloomSkillSummary,
   RunloomTodoItem,
   SubscribeOptions,
   SubmitOptions,
@@ -68,6 +70,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly store = new InMemorySessionStore();
   private readonly providers = new Map<string, ModelProvider>();
   private readonly tools = new Map<string, ToolDefinition>();
+  private readonly skills = new Map<string, RunloomSkillSummary>();
+  private readonly mcpServers = new Map<string, McpServerSummary>();
   private readonly approvalPolicyStore?: FileApprovalPolicyStore;
   private readonly config: RunloomConfig;
   private readonly toolExecutor: ToolExecutor;
@@ -263,6 +267,40 @@ export class DefaultRunloomAgent implements RunloomAgent {
         permissions: [...tool.permissions]
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async listSkills(): Promise<RunloomSkillSummary[]> {
+    return [...this.skills.values()]
+      .map((skill) => ({
+        ...skill,
+        triggers: skill.triggers ? [...skill.triggers] : undefined,
+        requiredTools: skill.requiredTools ? [...skill.requiredTools] : undefined
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async registerSkill(skill: RunloomSkillSummary): Promise<void> {
+    this.skills.set(skill.name, {
+      ...skill,
+      triggers: skill.triggers ? [...skill.triggers] : undefined,
+      requiredTools: skill.requiredTools ? [...skill.requiredTools] : undefined
+    });
+  }
+
+  async listMcpServers(): Promise<McpServerSummary[]> {
+    return [...this.mcpServers.values()]
+      .map((server) => ({
+        ...server,
+        tools: server.tools ? [...server.tools] : undefined
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async registerMcpServer(server: McpServerSummary): Promise<void> {
+    this.mcpServers.set(server.name, {
+      ...server,
+      tools: server.tools ? [...server.tools] : undefined
+    });
   }
 
   async getSession(sessionId: string): Promise<RunloomSession> {

@@ -32,10 +32,10 @@
 ## Phase 1：runloom-agent 最小 runtime
 
 - [x] 定义 public API：`createRunloomAgent`、`RunloomAgent`、`RunloomEvent`、`ModelProvider`、`ToolDefinition`。
-- [~] 实现 session、run、message、event 基础 store：已实现 in-memory session/run/message/event 查询；仍需持久化 store。
+- [x] 实现 session、run、message、event 基础 store：已支持 in-memory 查询和 `stateDir` workspace 文件持久化。
 - [x] 接入至少一个真实模型协议 adapter，保证最小 runtime 不依赖 mock 数据。
 - [x] 测试代码可提供 test-only provider，覆盖文本输出、tool call 和错误注入。
-- [~] 实现最小动态 loop：已实现 submit、subscribe、active run cancel 和同进程 in-memory resume；仍需持久化 run 恢复与 approval 后续接续。
+- [x] 实现最小动态 loop：已实现 submit、subscribe、active run cancel、同进程 resume、approval 后续接续和 `stateDir` 持久化 run 恢复。
 - [x] 实现 todo store 和 `todo.updated` 事件。
 - [x] 实现基础工具注册和工具执行器。
 - [x] 实现 approval request/resolution。
@@ -64,7 +64,7 @@
 - [x] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。
 - [x] 代码修改计划：高风险修改前生成 edit plan，说明目标文件、风险和验证命令。
 - [x] 用户改动保护：修改前检测目标文件是否已有用户未提交变更，避免覆盖。
-- [~] Review 模式：已支持任务推断和 TUI `/review` code_review 路由；仍需专用 review 输出模板与 findings 结构。
+- [x] Review 模式：已支持任务推断、TUI `/review` code_review 路由、专用 review 输出模板与结构化 findings 记录。
 - [x] 最终交付摘要：输出修改文件、核心变更、验证结果、失败项和剩余风险。
 
 验收标准：
@@ -90,14 +90,14 @@
 
 ## Phase 2.5：横向扩展与 VSCode 插件准备
 
-- [ ] 定义 `RunloomHostAdapter`。
-- [ ] 定义 `WorkspaceAdapter`，支持未来 VSCode multi-root 和 virtual workspace。
-- [ ] 定义 `TerminalAdapter`，隔离 shell 执行与宿主 terminal。
-- [ ] 定义 `DiffAdapter`，支持未来 VSCode diff editor 和 inline diff。
-- [ ] 定义 `ApprovalBridge`，支持跨 UI 处理 approval。
-- [ ] 定义 `DiagnosticsAdapter`，为 VSCode Problems/diagnostics 预留上下文入口。
-- [ ] 设计 future `extensions/runloom-vscode` 目录，不进入首期实现。
-- [ ] 确保 `runloom-agent` 不依赖 VSCode API、TUI API 或 Web API。
+- [x] 定义 `RunloomHostAdapter`。
+- [x] 定义 `WorkspaceAdapter`，支持未来 VSCode multi-root 和 virtual workspace。
+- [x] 定义 `TerminalAdapter`，隔离 shell 执行与宿主 terminal。
+- [x] 定义 `DiffAdapter`，支持未来 VSCode diff editor 和 inline diff。
+- [x] 定义 `ApprovalBridge`，支持跨 UI 处理 approval。
+- [x] 定义 `DiagnosticsAdapter`，为 VSCode Problems/diagnostics 预留上下文入口。
+- [x] 设计 future `extensions/runloom-vscode` 目录，不进入首期实现。
+- [x] 确保 `runloom-agent` 不依赖 VSCode API、TUI API 或 Web API。
 
 验收标准：
 
@@ -159,14 +159,14 @@
 
 - [x] 定义 Skills/MCP public list/register API，供 TUI、Web、VSCode 等 host 横向复用。
 - [x] TUI 支持 `/skills`、`/mcp` 展示当前真实注册状态；默认不注入产品 mock 数据。
-- [ ] Skill manifest schema。
-- [ ] 加载 `~/.runloom/skills/installed` 和 `generated`。
-- [ ] skill 触发选择器。
-- [ ] skill 上下文注入和事件。
-- [ ] Skill Forge proposal、验证和 approval。
-- [ ] MCP client：tools/resources/prompts discovery。
-- [ ] MCP server：暴露 Runloom tools、skills、memory query、agent service。
-- [ ] MCP 工具调用进入统一 approval/audit/trace。
+- [x] Skill manifest schema。
+- [x] 加载 `~/.runloom/skills/installed` 和 `generated`。
+- [x] skill 触发选择器。
+- [x] skill 上下文注入和事件。
+- [x] Skill Forge proposal、验证和 approval。
+- [x] MCP client：tools/resources/prompts discovery。
+- [x] MCP server：暴露 Runloom tools、skills、memory query、agent service。
+- [x] MCP 工具调用进入统一 approval/audit/trace。
 
 验收标准：
 

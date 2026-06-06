@@ -7,11 +7,18 @@ import { FILE_HEADERS_ONLY, createTwoFilesPatch } from "diff";
 import type {
   CodeDeliverySummary,
   CodeEditPlan,
+  CodeReviewFinding,
+  CodeReviewFindings,
   GitStatusSummary,
   RunloomDeliverySummary,
   RunloomDeliveryVerificationResult,
   RunloomDiffSummary,
   RunloomEditPlan,
+  RunloomReviewFindingCategory,
+  RunloomReviewFindingSeverity,
+  RunloomReviewFindings,
+  RunloomReviewLocation,
+  TerminalAdapter,
   ToolDefinition,
   VerificationResult
 } from "../types.js";
@@ -23,7 +30,11 @@ import {
 const execFileAsync = promisify(execFile);
 const SKIPPED_DIRS = new Set([".git", "node_modules", "dist", ".tsbuildinfo"]);
 
-export function createBuiltInCodingTools(): ToolDefinition[] {
+export interface CreateBuiltInCodingToolsOptions {
+  terminal?: TerminalAdapter;
+}
+
+export function createBuiltInCodingTools(options: CreateBuiltInCodingToolsOptions = {}): ToolDefinition[] {
   return [
     createListFilesTool(),
     createReadFileTool(),
@@ -32,9 +43,10 @@ export function createBuiltInCodingTools(): ToolDefinition[] {
     createWriteFileTool(),
     createPatchFileTool(),
     createDiffTextTool(),
-    createVerifyCommandTool(),
+    createVerifyCommandTool(options.terminal),
     createGitStatusTool(),
     createGitDiffTool(),
+    createReviewFindingsTool(),
     createDeliverySummaryTool()
   ];
 }
@@ -241,6 +253,65 @@ function createDeliverySummaryTool(): ToolDefinition<CodeDeliverySummary, Runloo
   };
 }
 
+function createReviewFindingsTool(): ToolDefinition<CodeReviewFindings, RunloomReviewFindings> {
+  return {
+    name: "review.findings",
+    description: "Record structured code review findings, including an explicit empty set when no issues are found.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              severity: { type: "string", enum: ["critical", "high", "medium", "low", "info"] },
+              title: { type: "string" },
+              description: { type: "string" },
+              category: {
+                type: "string",
+                enum: ["bug", "regression", "security", "performance", "maintainability", "test_gap", "api_risk", "other"]
+              },
+              location: {
+                type: "object",
+                properties: {
+                  path: { type: "string" },
+                  line: { type: "number" },
+                  column: { type: "number" },
+                  endLine: { type: "number" },
+                  endColumn: { type: "number" }
+                },
+                required: ["path"],
+                additionalProperties: false
+              },
+              evidence: { type: "array", items: { type: "string" } },
+              recommendation: { type: "string" }
+            },
+            required: ["severity", "title", "description"],
+            additionalProperties: false
+          }
+        },
+        reviewedFiles: { type: "array", items: { type: "string" } },
+        summary: { type: "string" }
+      },
+      required: ["findings", "reviewedFiles"],
+      additionalProperties: false
+    },
+    permissions: [],
+    async execute(input, context) {
+      return {
+        id: `review_${randomUUID()}`,
+        runId: context.runId,
+        sessionId: context.sessionId,
+        findings: requireReviewFindings(input.findings),
+        reviewedFiles: requireReviewStringArray(input.reviewedFiles, "reviewedFiles"),
+        summary: input.summary === undefined ? undefined : requireReviewNonEmptyString(input.summary, "summary"),
+        createdAt: new Date().toISOString()
+      };
+    }
+  };
+}
+
 function createWriteFileTool(): ToolDefinition<
   { path: string; content: string; expectedSha256?: string; allowDirty?: boolean },
   { path: string; bytes: number; sha256Before?: string; sha256After: string }
@@ -369,7 +440,7 @@ function createDiffTextTool(): ToolDefinition<{ before: string; after: string; f
   };
 }
 
-function createVerifyCommandTool(): ToolDefinition<
+function createVerifyCommandTool(terminal?: TerminalAdapter): ToolDefinition<
   { command: string; args?: string[]; cwd?: string; timeoutMs?: number },
   VerificationResult
 > {
@@ -391,6 +462,9 @@ function createVerifyCommandTool(): ToolDefinition<
     async execute(input, context) {
       const started = Date.now();
       const cwd = await resolveExistingWorkspacePath(context.workspace, input.cwd);
+      if (terminal) {
+        return runVerificationWithTerminalAdapter(terminal, input, cwd, started, context.signal);
+      }
       try {
         const result = await execFileAsync(input.command, input.args ?? [], {
           cwd,
@@ -456,6 +530,55 @@ function createGitStatusTool(): ToolDefinition<Record<string, never>, GitStatusS
         };
       }
     }
+  };
+}
+
+async function runVerificationWithTerminalAdapter(
+  terminal: TerminalAdapter,
+  input: { command: string; args?: string[]; timeoutMs?: number },
+  cwd: string,
+  started: number,
+  signal: AbortSignal | undefined
+): Promise<VerificationResult> {
+  let stdout = "";
+  let stderr = "";
+  let exitCode = 0;
+  try {
+    for await (const event of terminal.run(
+      {
+        command: input.command,
+        args: input.args,
+        cwd,
+        timeoutMs: input.timeoutMs
+      },
+      {
+        cwd,
+        timeoutMs: input.timeoutMs ?? 120_000,
+        signal
+      }
+    )) {
+      if (event.type === "stdout") {
+        stdout += event.text;
+      } else if (event.type === "stderr") {
+        stderr += event.text;
+      } else if (event.type === "exit") {
+        exitCode = event.exitCode;
+      } else if (event.type === "failed") {
+        exitCode = event.exitCode ?? 1;
+        stderr += event.error;
+      }
+    }
+  } catch (error) {
+    exitCode = 1;
+    stderr += error instanceof Error ? error.message : String(error);
+  }
+
+  return {
+    command: [input.command, ...(input.args ?? [])].join(" "),
+    exitCode,
+    stdout,
+    stderr,
+    durationMs: Date.now() - started
   };
 }
 
@@ -633,6 +756,94 @@ function requireVerificationResults(value: unknown): RunloomDeliveryVerification
 
 function isVerificationStatus(value: unknown): value is RunloomDeliveryVerificationResult["status"] {
   return value === "passed" || value === "failed" || value === "skipped";
+}
+
+const REVIEW_FINDING_SEVERITIES = new Set<RunloomReviewFindingSeverity>(["critical", "high", "medium", "low", "info"]);
+const REVIEW_FINDING_CATEGORIES = new Set<RunloomReviewFindingCategory>([
+  "bug",
+  "regression",
+  "security",
+  "performance",
+  "maintainability",
+  "test_gap",
+  "api_risk",
+  "other"
+]);
+
+function requireReviewFindings(value: unknown): CodeReviewFinding[] {
+  if (!Array.isArray(value)) {
+    throw new Error("review.findings requires findings to be an array.");
+  }
+
+  return value.map((item) => {
+    if (typeof item !== "object" || item === null) {
+      throw new Error("review.findings requires each finding to be an object.");
+    }
+    const finding = item as Partial<CodeReviewFinding>;
+    if (!isReviewSeverity(finding.severity)) {
+      throw new Error("review.findings severity must be critical, high, medium, low, or info.");
+    }
+    if (finding.category !== undefined && !isReviewCategory(finding.category)) {
+      throw new Error(
+        "review.findings category must be bug, regression, security, performance, maintainability, test_gap, api_risk, or other."
+      );
+    }
+    return {
+      severity: finding.severity,
+      title: requireReviewNonEmptyString(finding.title, "title"),
+      description: requireReviewNonEmptyString(finding.description, "description"),
+      category: finding.category,
+      location: finding.location === undefined ? undefined : requireReviewLocation(finding.location),
+      evidence: finding.evidence === undefined ? undefined : requireReviewStringArray(finding.evidence, "evidence"),
+      recommendation:
+        finding.recommendation === undefined
+          ? undefined
+          : requireReviewNonEmptyString(finding.recommendation, "recommendation")
+    };
+  });
+}
+
+function requireReviewLocation(value: unknown): RunloomReviewLocation {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("review.findings requires location to be an object.");
+  }
+  const location = value as Partial<RunloomReviewLocation>;
+  return {
+    path: requireReviewNonEmptyString(location.path, "location.path"),
+    line: location.line === undefined ? undefined : requirePositiveInteger(location.line, "location.line"),
+    column: location.column === undefined ? undefined : requirePositiveInteger(location.column, "location.column"),
+    endLine: location.endLine === undefined ? undefined : requirePositiveInteger(location.endLine, "location.endLine"),
+    endColumn: location.endColumn === undefined ? undefined : requirePositiveInteger(location.endColumn, "location.endColumn")
+  };
+}
+
+function requireReviewStringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`review.findings requires ${fieldName} to be a string array.`);
+  }
+  return value.map((item) => requireReviewNonEmptyString(item, fieldName));
+}
+
+function requireReviewNonEmptyString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`review.findings requires a non-empty ${fieldName}.`);
+  }
+  return value.trim();
+}
+
+function requirePositiveInteger(value: unknown, fieldName: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new Error(`review.findings requires ${fieldName} to be a positive integer.`);
+  }
+  return value;
+}
+
+function isReviewSeverity(value: unknown): value is RunloomReviewFindingSeverity {
+  return typeof value === "string" && REVIEW_FINDING_SEVERITIES.has(value as RunloomReviewFindingSeverity);
+}
+
+function isReviewCategory(value: unknown): value is RunloomReviewFindingCategory {
+  return typeof value === "string" && REVIEW_FINDING_CATEGORIES.has(value as RunloomReviewFindingCategory);
 }
 
 function requireFiniteNumber(value: unknown, fieldName: string): number {

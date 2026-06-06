@@ -85,6 +85,32 @@ test("approval command updates scope and default modes", async () => {
         }
       ];
     },
+    async listSkillProposals() {
+      return [
+        {
+          id: "skillprop_test",
+          skillName: "generated-review",
+          changeType: "create",
+          reason: "Repeated review guidance.",
+          evidence: ["review tasks"],
+          diff: "",
+          validation: {
+            valid: true,
+            diagnostics: []
+          },
+          risk: {
+            level: "high",
+            reasons: ["create changes the local skill registry"]
+          },
+          status: "waiting_approval",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          runId: "skill_test",
+          sessionId: "ses_tool",
+          approvalId: "approval_skill"
+        }
+      ];
+    },
     async listMcpServers() {
       return [
         {
@@ -220,6 +246,31 @@ test("approval command updates scope and default modes", async () => {
       ]
     }
   });
+  app.render({
+    id: "evt_review",
+    type: "review.findings.created",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 2,
+    timestamp: "2026-01-01T00:00:03.000Z",
+    source: "coding",
+    payload: {
+      reviewedFiles: ["packages/runloom-tui/src/app/tui-app.ts"],
+      summary: "One issue found.",
+      findings: [
+        {
+          severity: "high",
+          title: "Approval decision errors are hidden",
+          category: "bug",
+          location: {
+            path: "packages/runloom-tui/src/app/tui-app.ts",
+            line: 120
+          },
+          recommendation: "Surface the original error message."
+        }
+      ]
+    }
+  });
   await app.runCommand("/todo");
   await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
@@ -251,6 +302,10 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Session: ses_tool/);
   assert.match(text, /Sessions:/);
   assert.match(text, /Todo:\n {2}in_progress Check TUI commands/);
+  assert.match(text, /\[review\] 1 finding\(s\)/);
+  assert.match(text, /Files: packages\/runloom-tui\/src\/app\/tui-app\.ts/);
+  assert.match(text, /high bug packages\/runloom-tui\/src\/app\/tui-app\.ts:120 - Approval decision errors are hidden/);
+  assert.match(text, /recommendation: Surface the original error message/);
   assert.match(text, /Diff: 1 file\(s\), \+4\/-1/);
   assert.match(text, /packages\/runloom-tui\/src\/app\/tui-app\.ts/);
   assert.match(text, /\[tests\] pnpm typecheck exit=0 duration=12ms/);

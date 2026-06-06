@@ -4,8 +4,13 @@ export class RunloomEventBus {
   private readonly events: RunloomEvent[] = [];
   private readonly listeners = new Set<RunloomEventListener>();
 
+  constructor(events: RunloomEvent[] = [], private readonly onChange?: () => void) {
+    this.events.push(...events.map((event) => ({ ...event })));
+  }
+
   emit(event: RunloomEvent): void {
     this.events.push(event);
+    this.onChange?.();
     for (const listener of this.listeners) {
       listener(event);
     }
@@ -32,5 +37,9 @@ export class RunloomEventBus {
       return [...this.events];
     }
     return this.events.filter((event) => event.sessionId === sessionId);
+  }
+
+  snapshot(): RunloomEvent[] {
+    return this.events.map((event) => ({ ...event }));
   }
 }

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { CodingTaskSummary, GitStatusSummary } from "../types.js";
+import type { CodingTaskSummary, GitStatusSummary, WorkspaceAdapter } from "../types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -11,10 +11,10 @@ export interface WorkspaceInspection {
   packageJson?: string;
 }
 
-export async function inspectWorkspace(workspace: string): Promise<WorkspaceInspection> {
-  const packageJson = await readOptionalText(join(workspace, "package.json"));
+export async function inspectWorkspace(workspace: string, adapter?: WorkspaceAdapter): Promise<WorkspaceInspection> {
+  const packageJson = await readOptionalText(join(workspace, "package.json"), adapter);
   const packageInfo = parsePackageInfo(packageJson);
-  const git = await readGitStatus(workspace);
+  const git = adapter?.getGitStatus ? await adapter.getGitStatus() : await readGitStatus(workspace);
 
   return {
     packageJson,
@@ -55,7 +55,14 @@ export function buildWorkspaceContext(inspection: WorkspaceInspection): string {
   return lines.join("\n");
 }
 
-async function readOptionalText(path: string): Promise<string | undefined> {
+async function readOptionalText(path: string, adapter?: WorkspaceAdapter): Promise<string | undefined> {
+  if (adapter?.readFile) {
+    try {
+      return (await adapter.readFile("package.json", { maxBytes: 12000, encoding: "utf8" })).content;
+    } catch {
+      // Fall through to the local filesystem for host adapters that only implement part of the contract.
+    }
+  }
   try {
     return await readFile(path, "utf8");
   } catch {

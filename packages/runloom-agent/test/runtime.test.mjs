@@ -478,6 +478,123 @@ test("agent resume replays a stored run in the same session", async () => {
   await agent.close();
 });
 
+test("approved model tool calls resume the same run after approval", async () => {
+  class ApprovalGatedToolProvider {
+    id = "approval-gated-tool-provider";
+    protocol = "custom";
+    capabilities = {
+      streaming: false,
+      tools: true
+    };
+    requests = [];
+
+    async *createResponse(request) {
+      this.requests.push(request);
+
+      if (this.requests.length === 1) {
+        yield { type: "response.created", responseId: "resp_needs_approval" };
+        yield { type: "response.output_text.delta", delta: "Need approval before verification.\n" };
+        yield {
+          type: "response.tool_call.completed",
+          toolCallId: "call_verify",
+          name: "shell.verify",
+          arguments: { command: "node", args: ["--version"] }
+        };
+        yield { type: "response.completed", finishReason: "tool_calls" };
+        return;
+      }
+
+      const toolOutput = request.input.find((item) => item.type === "function_call_output");
+      assert.ok(toolOutput);
+      assert.equal(toolOutput.toolCallId, "call_verify");
+      assert.match(toolOutput.output, /"status":"completed"/);
+      assert.match(toolOutput.output, /"exitCode":0/);
+
+      yield { type: "response.created", responseId: "resp_after_approval" };
+      yield { type: "response.output_text.delta", delta: "Verification completed after approval." };
+      yield { type: "response.completed", finishReason: "stop" };
+    }
+  }
+
+  const provider = new ApprovalGatedToolProvider();
+  const agent = await createRunloomAgent({
+    provider,
+    model: "gpt-4.1",
+    workspace: process.cwd()
+  });
+  const eventTypes = [];
+  agent.subscribe((event) => eventTypes.push(event.type));
+
+  const waiting = await agent.submit("Run the verification command.");
+  const stillWaiting = await agent.resume(waiting.runId);
+  await agent.resolveApproval(waiting.approvalId, { decision: "approved" });
+  const resumed = await agent.resume(waiting.runId);
+  const run = await agent.getRun(waiting.runId);
+  const messages = await agent.listMessages({ runId: waiting.runId });
+
+  assert.equal(waiting.status, "waiting_approval");
+  assert.ok(waiting.approvalId);
+  assert.equal(stillWaiting.status, "waiting_approval");
+  assert.equal(stillWaiting.approvalId, waiting.approvalId);
+  assert.equal(resumed.runId, waiting.runId);
+  assert.equal(resumed.status, "completed");
+  assert.equal(run.status, "completed");
+  assert.equal(provider.requests.length, 2);
+  assert.match(resumed.outputText, /Need approval before verification/);
+  assert.match(resumed.outputText, /Verification completed after approval/);
+  assert.ok(eventTypes.includes("tool.call.approved"));
+  assert.equal(messages.filter((message) => message.role === "assistant").length, 2);
+  assert.equal(messages.filter((message) => message.role === "tool").length, 1);
+  await agent.close();
+});
+
+test("denied model tool approvals cancel the waiting run without executing the tool", async () => {
+  class DeniedApprovalProvider {
+    id = "denied-approval-provider";
+    protocol = "custom";
+    capabilities = {
+      streaming: false,
+      tools: true
+    };
+    requests = [];
+
+    async *createResponse(request) {
+      this.requests.push(request);
+      yield { type: "response.created", responseId: "resp_denied_approval" };
+      yield {
+        type: "response.tool_call.completed",
+        toolCallId: "call_denied_verify",
+        name: "shell.verify",
+        arguments: { command: "node", args: ["--version"] }
+      };
+      yield { type: "response.completed", finishReason: "tool_calls" };
+    }
+  }
+
+  const provider = new DeniedApprovalProvider();
+  const agent = await createRunloomAgent({
+    provider,
+    model: "gpt-4.1",
+    workspace: process.cwd()
+  });
+  const eventTypes = [];
+  agent.subscribe((event) => eventTypes.push(event.type));
+
+  const waiting = await agent.submit("Run a command that will be denied.");
+  await agent.resolveApproval(waiting.approvalId, { decision: "denied" });
+  const resumed = await agent.resume(waiting.runId);
+  const run = await agent.getRun(waiting.runId);
+
+  assert.equal(waiting.status, "waiting_approval");
+  assert.equal(resumed.status, "cancelled");
+  assert.equal(resumed.runId, waiting.runId);
+  assert.match(resumed.outputText, /Approval denied/);
+  assert.equal(run.status, "cancelled");
+  assert.equal(provider.requests.length, 1);
+  assert.ok(!eventTypes.includes("tool.call.approved"));
+  await agent.close();
+});
+
 test("runs and events can be queried through the public API", async () => {
   const provider = new RecordingProvider("query-provider");
   const agent = await createRunloomAgent({
@@ -519,6 +636,138 @@ test("runs and events can be queried through the public API", async () => {
   assert.equal(messages[1].content[0].text, result.outputText);
   assert.deepEqual(noMessages, []);
   await agent.close();
+});
+
+test("stateDir persists sessions, runs, messages, and replayable events", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-runtime-state-"));
+  const workspace = await mkdtemp(join(tmpdir(), "runloom-runtime-workspace-"));
+
+  try {
+    const firstAgent = await createRunloomAgent({
+      provider: new RecordingProvider("persistent-provider"),
+      model: "gpt-4.1",
+      workspace,
+      stateDir
+    });
+    const first = await firstAgent.submit("persist this run");
+    await firstAgent.close();
+
+    const secondAgent = await createRunloomAgent({
+      provider: new RecordingProvider("persistent-provider"),
+      model: "gpt-4.1",
+      workspace,
+      stateDir
+    });
+    const replayed = [];
+    const unsubscribe = secondAgent.subscribe((event) => replayed.push(event), {
+      replay: true,
+      sessionId: first.sessionId
+    });
+    unsubscribe();
+
+    const session = await secondAgent.getSession(first.sessionId);
+    const run = await secondAgent.getRun(first.runId);
+    const sessions = await secondAgent.listSessions();
+    const runs = await secondAgent.listRuns({ sessionId: first.sessionId });
+    const messages = await secondAgent.listMessages({ runId: first.runId });
+    const events = await secondAgent.listEvents({ runId: first.runId });
+
+    assert.equal(first.status, "completed");
+    assert.equal(session.id, first.sessionId);
+    assert.equal(run.id, first.runId);
+    assert.equal(run.status, "completed");
+    assert.equal(run.outputText, first.outputText);
+    assert.equal(sessions.length, 1);
+    assert.equal(runs.length, 1);
+    assert.equal(messages.length, 2);
+    assert.ok(events.some((event) => event.type === "run.started"));
+    assert.ok(events.some((event) => event.type === "run.completed"));
+    assert.equal(replayed.length, events.length);
+    await secondAgent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("stateDir persists waiting approval runs and resumes them in a new agent", async () => {
+  class PersistentApprovalProvider {
+    id = "persistent-approval-provider";
+    protocol = "custom";
+    capabilities = {
+      streaming: false,
+      tools: true
+    };
+    requests = [];
+
+    async *createResponse(request) {
+      this.requests.push(request);
+      const toolOutput = request.input.find((item) => item.type === "function_call_output");
+      if (toolOutput) {
+        assert.equal(toolOutput.toolCallId, "call_persistent_verify");
+        assert.match(toolOutput.output, /"status":"completed"/);
+        yield { type: "response.created", responseId: "resp_persistent_after_approval" };
+        yield { type: "response.output_text.delta", delta: "Persistent verification completed." };
+        yield { type: "response.completed", finishReason: "stop" };
+        return;
+      }
+
+      yield { type: "response.created", responseId: "resp_persistent_waiting" };
+      yield { type: "response.output_text.delta", delta: "Persisting before approval.\n" };
+      yield {
+        type: "response.tool_call.completed",
+        toolCallId: "call_persistent_verify",
+        name: "shell.verify",
+        arguments: { command: "node", args: ["--version"] }
+      };
+      yield { type: "response.completed", finishReason: "tool_calls" };
+    }
+  }
+
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-pending-state-"));
+  const workspace = await mkdtemp(join(tmpdir(), "runloom-pending-workspace-"));
+
+  try {
+    const firstProvider = new PersistentApprovalProvider();
+    const firstAgent = await createRunloomAgent({
+      provider: firstProvider,
+      model: "gpt-4.1",
+      workspace,
+      stateDir
+    });
+    const waiting = await firstAgent.submit("Run a persistent verification command.");
+    await firstAgent.close();
+
+    const secondProvider = new PersistentApprovalProvider();
+    const secondAgent = await createRunloomAgent({
+      provider: secondProvider,
+      model: "gpt-4.1",
+      workspace,
+      stateDir
+    });
+    const approvals = await secondAgent.listApprovals();
+    await secondAgent.resolveApproval(waiting.approvalId, { decision: "approved" });
+    const resumed = await secondAgent.resume(waiting.runId);
+    const run = await secondAgent.getRun(waiting.runId);
+    const events = await secondAgent.listEvents({ runId: waiting.runId });
+
+    assert.equal(waiting.status, "waiting_approval");
+    assert.equal(firstProvider.requests.length, 1);
+    assert.equal(approvals.length, 1);
+    assert.equal(approvals[0].id, waiting.approvalId);
+    assert.equal(resumed.runId, waiting.runId);
+    assert.equal(resumed.status, "completed");
+    assert.match(resumed.outputText, /Persisting before approval/);
+    assert.match(resumed.outputText, /Persistent verification completed/);
+    assert.equal(run.status, "completed");
+    assert.equal(secondProvider.requests.length, 1);
+    assert.ok(events.some((event) => event.type === "tool.call.approved"));
+    assert.ok(events.some((event) => event.type === "run.completed"));
+    await secondAgent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("built-in coding tools operate on real workspace data", async () => {
@@ -731,6 +980,7 @@ test("built-in tools can be listed for host adapters", async () => {
   const diffTool = tools.find((tool) => tool.name === "git.diff");
   const editPlanTool = tools.find((tool) => tool.name === "edit.plan");
   const deliverySummaryTool = tools.find((tool) => tool.name === "delivery.summary");
+  const reviewFindingsTool = tools.find((tool) => tool.name === "review.findings");
 
   assert.ok(readTool);
   assert.equal(readTool.permissions[0], "filesystem.read");
@@ -744,7 +994,239 @@ test("built-in tools can be listed for host adapters", async () => {
   assert.deepEqual(editPlanTool.permissions, []);
   assert.ok(deliverySummaryTool);
   assert.deepEqual(deliverySummaryTool.permissions, []);
+  assert.ok(reviewFindingsTool);
+  assert.deepEqual(reviewFindingsTool.permissions, []);
   await agent.close();
+});
+
+test("code review runs use review instructions and structured findings tool", async () => {
+  const provider = new RecordingProvider("review-provider");
+  const agent = await createRunloomAgent({
+    provider,
+    model: "gpt-4.1",
+    workspace: process.cwd()
+  });
+
+  const result = await agent.submit({
+    text: "review the current changes",
+    taskType: "code_review"
+  });
+
+  assert.equal(result.status, "completed");
+  assert.match(provider.requests[0].input[0].content[0].text, /Review mode is active/);
+  assert.ok(provider.requests[0].tools.some((tool) => tool.name === "review.findings"));
+  await agent.close();
+});
+
+test("agent loads skill manifests from stateDir", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-agent-skills-"));
+
+  try {
+    await writeSkillFixture(stateDir, "installed", "typescript-code-review", {
+      name: "typescript-code-review",
+      version: "0.1.0",
+      description: "Review TypeScript changes.",
+      triggers: ["review TypeScript"],
+      requiredTools: ["fs.read", "git.diff"],
+      permissions: {
+        readWorkspace: true,
+        writeWorkspace: false,
+        shell: "ask"
+      },
+      validation: {
+        schema: "skill-manifest@1",
+        tests: ["tests/*.case.md"]
+      }
+    });
+    await writeSkillFixture(
+      stateDir,
+      "generated",
+      "bad-skill",
+      {
+        name: "bad-skill",
+        description: "Invalid generated skill.",
+        triggers: ["bad"],
+        validation: {
+          schema: "wrong-schema"
+        }
+      },
+      "## 适用场景\n\nOnly one section.\n"
+    );
+
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: "",
+      stateDir
+    });
+
+    const skills = await agent.listSkills();
+    const events = await agent.listEvents({ runId: "skills" });
+    const loadedEvent = events.find((event) => event.type === "skills.loaded");
+    const diagnosticEvent = events.find((event) => event.type === "skills.diagnostic");
+
+    assert.equal(skills.length, 2);
+    assert.equal(skills[0].name, "bad-skill");
+    assert.equal(skills[0].enabled, false);
+    assert.match(skills[0].diagnostics[0], /validation\.schema/);
+    assert.equal(skills[1].name, "typescript-code-review");
+    assert.equal(skills[1].source, "installed");
+    assert.equal(skills[1].permissions.shell, "ask");
+    assert.deepEqual(skills[1].validation.tests, ["tests/*.case.md"]);
+    assert.match(skills[1].contentHash, /^[a-f0-9]{64}$/);
+    assert.equal(loadedEvent.payload.count, 2);
+    assert.equal(loadedEvent.payload.enabled, 1);
+    assert.equal(loadedEvent.payload.disabled, 1);
+    assert.equal(diagnosticEvent.payload.skillName, "bad-skill");
+    await agent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("matching skills activate and inject context into model requests", async () => {
+  const provider = new RecordingProvider("skill-context-provider");
+  const agent = await createRunloomAgent({
+    provider,
+    model: "gpt-4.1",
+    workspace: process.cwd()
+  });
+  const skillEvents = [];
+  agent.subscribe((event) => {
+    if (event.type === "skill.activated") {
+      skillEvents.push(event.payload);
+    }
+  });
+
+  await agent.registerSkill({
+    name: "typescript-code-review",
+    version: "0.1.0",
+    description: "Review TypeScript changes for public API risk.",
+    enabled: true,
+    source: "registered",
+    triggers: ["review TypeScript"],
+    requiredTools: ["fs.read"],
+    instructions: "## 执行步骤\n\nFind bugs first.\n\n## 输出格式\n\nFindings first."
+  });
+
+  const result = await agent.submit("Please review TypeScript changes");
+  const userMessage = provider.requests[0].input.find((item) => item.type === "message" && item.role === "user");
+
+  assert.equal(result.status, "completed");
+  assert.equal(skillEvents.length, 1);
+  assert.equal(skillEvents[0].skillName, "typescript-code-review");
+  assert.match(skillEvents[0].reason, /trigger matched user input/);
+  assert.match(userMessage.content[0].text, /Activated skills:/);
+  assert.match(userMessage.content[0].text, /typescript-code-review@0\.1\.0/);
+  assert.match(userMessage.content[0].text, /Find bugs first/);
+  await agent.close();
+});
+
+test("MCP config discovery registers tools that enter approval policy", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-mcp-discovery-"));
+  const adapter = new RecordingMcpClient();
+
+  try {
+    await writeMcpConfigFixture(stateDir, {
+      servers: {
+        workspace: {
+          transport: "custom",
+          enabled: true,
+          permissions: {
+            tools: "ask",
+            resources: "allow",
+            prompts: "allow"
+          }
+        }
+      }
+    });
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: "",
+      stateDir,
+      mcpClient: adapter
+    });
+
+    const servers = await agent.listMcpServers();
+    const tools = await agent.listTools();
+    const result = await agent.executeTool("mcp.workspace.echo", { text: "hello" });
+
+    assert.equal(servers[0].status, "connected");
+    assert.deepEqual(servers[0].tools, ["echo"]);
+    assert.equal(servers[0].resources, 1);
+    assert.equal(servers[0].prompts, 1);
+    assert.ok(tools.some((tool) => tool.name === "mcp.workspace.echo"));
+    assert.equal(result.status, "waiting_approval");
+    assert.equal(adapter.calls.length, 0);
+    await agent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("approved MCP tools call the adapter and emit MCP call events", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-mcp-call-"));
+  const adapter = new RecordingMcpClient();
+
+  try {
+    await writeMcpConfigFixture(stateDir, {
+      servers: {
+        workspace: {
+          transport: "custom",
+          enabled: true,
+          permissions: {
+            tools: "ask",
+            resources: "allow",
+            prompts: "allow"
+          }
+        }
+      }
+    });
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: "",
+      stateDir,
+      mcpClient: adapter,
+      approvalPolicy: {
+        scopes: {
+          "mcp.tools": "full_access"
+        }
+      }
+    });
+    const eventTypes = [];
+    agent.subscribe((event) => eventTypes.push(event.type));
+
+    await agent.listMcpServers();
+    const result = await agent.executeTool("mcp.workspace.echo", { text: "hello" });
+    const auditRecords = await agent.listAuditRecords({ action: "mcp.tool.called" });
+
+    assert.equal(result.status, "completed");
+    assert.deepEqual(result.output, {
+      serverName: "workspace",
+      toolName: "echo",
+      input: { text: "hello" }
+    });
+    assert.deepEqual(adapter.calls, [
+      {
+        serverName: "workspace",
+        toolName: "echo",
+        input: { text: "hello" }
+      }
+    ]);
+    assert.ok(eventTypes.includes("mcp.discovery.completed"));
+    assert.ok(eventTypes.includes("mcp.tool.call.requested"));
+    assert.ok(eventTypes.includes("mcp.tool.call.completed"));
+    assert.equal(auditRecords.length, 1);
+    assert.equal(auditRecords[0].summary, "MCP tool called: workspace/echo");
+    await agent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("skills and MCP servers can be registered without product mock data", async () => {
@@ -862,6 +1344,53 @@ class RecordingProvider {
   }
 }
 
+class RecordingMcpClient {
+  calls = [];
+
+  async discover(server) {
+    return {
+      tools: [
+        {
+          name: "echo",
+          description: "Echo input.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              text: { type: "string" }
+            },
+            additionalProperties: false
+          }
+        }
+      ],
+      resources: [
+        {
+          uri: `runloom://${server.name}/resource`,
+          name: "resource"
+        }
+      ],
+      prompts: [
+        {
+          name: "prompt",
+          description: "Prompt fragment."
+        }
+      ]
+    };
+  }
+
+  async callTool(server, toolName, input) {
+    this.calls.push({
+      serverName: server.name,
+      toolName,
+      input
+    });
+    return {
+      serverName: server.name,
+      toolName,
+      input
+    };
+  }
+}
+
 function waitForAbort(signal) {
   return new Promise((_, reject) => {
     if (signal?.aborted) {
@@ -880,4 +1409,35 @@ function waitForAbort(signal) {
 
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
+}
+
+async function writeSkillFixture(stateDir, source, name, manifest, instructions = validSkillInstructions()) {
+  const skillDir = join(stateDir, "skills", source, name);
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(join(skillDir, "skill.json"), JSON.stringify(manifest, null, 2), "utf8");
+  await writeFile(join(skillDir, "SKILL.md"), instructions, "utf8");
+}
+
+async function writeMcpConfigFixture(stateDir, config) {
+  await mkdir(join(stateDir, "mcp"), { recursive: true });
+  await writeFile(join(stateDir, "mcp", "servers.json"), JSON.stringify(config, null, 2), "utf8");
+}
+
+function validSkillInstructions() {
+  return [
+    "## 适用场景",
+    "Review tasks.",
+    "## 不适用场景",
+    "Unrelated tasks.",
+    "## 执行步骤",
+    "Read, compare, report.",
+    "## 所需工具",
+    "fs.read and git.diff.",
+    "## 验证方式",
+    "Check findings.",
+    "## 输出格式",
+    "Findings first.",
+    "## 示例",
+    "Example review."
+  ].join("\n\n");
 }

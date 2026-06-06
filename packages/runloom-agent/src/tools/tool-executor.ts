@@ -20,14 +20,16 @@ export interface ToolExecutorOptions {
   logger?: RunloomLogger;
 }
 
+interface ToolExecutorContext extends Omit<ToolContext, "workspace"> {
+  workspace?: string;
+  skipApproval?: boolean;
+  approvalId?: string;
+}
+
 export class ToolExecutor {
   constructor(private readonly options: ToolExecutorOptions) {}
 
-  async execute<TOutput>(
-    tool: ToolDefinition,
-    input: unknown,
-    context: Omit<ToolContext, "workspace"> & { workspace?: string }
-  ): Promise<ToolExecutionResult<TOutput>> {
+  async execute<TOutput>(tool: ToolDefinition, input: unknown, context: ToolExecutorContext): Promise<ToolExecutionResult<TOutput>> {
     const started = Date.now();
     const runId = context.runId;
     const sessionId = context.sessionId;
@@ -60,7 +62,7 @@ export class ToolExecutor {
       fullContext.workspace
     );
 
-    const approval = this.checkApproval(tool, safeInput, runId, sessionId);
+    const approval = context.skipApproval ? undefined : this.checkApproval(tool, safeInput, runId, sessionId);
     if (approval) {
       this.options.saveApproval(approval);
       this.options.emit("approval.requested", "approval", runId, sessionId, approval);
@@ -83,6 +85,12 @@ export class ToolExecutor {
         approvalId: approval.id,
         durationMs: Date.now() - started
       };
+    }
+    if (context.skipApproval) {
+      this.options.emit("tool.call.approved", "tool", runId, sessionId, {
+        toolName: tool.name,
+        approvalId: context.approvalId
+      });
     }
 
     this.options.emit("tool.call.started", "tool", runId, sessionId, {

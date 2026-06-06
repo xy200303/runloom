@@ -11,6 +11,7 @@ import type {
   RunloomAgent,
   RunloomEvent,
   RunloomSession,
+  RunloomSkillProposal,
   RunloomSkillSummary,
   RunloomTodoItem,
   ToolSummary,
@@ -153,6 +154,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       case "model.selection.resolved":
         output.write(`[model] ${formatModelSelection(event.payload)}\n`);
         break;
+      case "review.findings.created":
+        output.write(formatReviewFindings(event.payload));
+        break;
       case "approval.policy.updated":
         output.write(`[approval] policy updated\n${formatApprovalPolicy(event.payload as ApprovalPolicyConfig)}\n`);
         break;
@@ -288,7 +292,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     if (command === "/skills") {
       const skills = await this.options.agent.listSkills();
-      output.write(formatSkills(skills));
+      const proposals = await this.options.agent.listSkillProposals();
+      output.write(formatSkills(skills, proposals));
       return;
     }
 
@@ -657,8 +662,8 @@ function formatApprovals(approvals: ApprovalRequest[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-function formatSkills(skills: RunloomSkillSummary[]): string {
-  if (skills.length === 0) {
+function formatSkills(skills: RunloomSkillSummary[], proposals: RunloomSkillProposal[] = []): string {
+  if (skills.length === 0 && proposals.length === 0) {
     return "Skills: (none registered)\n";
   }
   const lines = ["Skills:"];
@@ -666,9 +671,40 @@ function formatSkills(skills: RunloomSkillSummary[]): string {
     const state = skill.enabled ? "enabled" : "disabled";
     const version = skill.version ? `@${skill.version}` : "";
     const requiredTools = skill.requiredTools?.length ? ` tools=${skill.requiredTools.join(",")}` : "";
-    lines.push(`  ${skill.name}${version} ${state} source=${skill.source}${requiredTools} - ${skill.description}`);
+    const permissions = formatSkillPermissions(skill.permissions);
+    const diagnostics = skill.diagnostics?.length ? ` diagnostics=${skill.diagnostics.join("; ")}` : "";
+    lines.push(
+      `  ${skill.name}${version} ${state} source=${skill.source}${requiredTools}${permissions}${diagnostics} - ${skill.description}`
+    );
+  }
+  if (proposals.length > 0) {
+    lines.push("Skill proposals:");
+    for (const proposal of proposals) {
+      const approval = proposal.approvalId ? ` approval=${proposal.approvalId}` : "";
+      const diagnostics = proposal.diagnostics?.length ? ` diagnostics=${proposal.diagnostics.join("; ")}` : "";
+      lines.push(
+        `  ${proposal.id} ${proposal.status} ${proposal.changeType} skill=${proposal.skillName} risk=${proposal.risk.level}${approval}${diagnostics}`
+      );
+    }
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatSkillPermissions(permissions: RunloomSkillSummary["permissions"]): string {
+  if (!permissions) {
+    return "";
+  }
+  const entries: string[] = [];
+  if (permissions.readWorkspace !== undefined) {
+    entries.push(`readWorkspace:${permissions.readWorkspace}`);
+  }
+  if (permissions.writeWorkspace !== undefined) {
+    entries.push(`writeWorkspace:${permissions.writeWorkspace}`);
+  }
+  if (permissions.shell !== undefined) {
+    entries.push(`shell:${permissions.shell}`);
+  }
+  return entries.length ? ` permissions=${entries.join(",")}` : "";
 }
 
 function formatMcpServers(servers: McpServerSummary[]): string {
@@ -680,8 +716,11 @@ function formatMcpServers(servers: McpServerSummary[]): string {
     const state = server.enabled ? "enabled" : "disabled";
     const tools = server.tools?.length ? ` tools=${server.tools.join(",")}` : "";
     const inventory = `resources=${server.resources ?? 0} prompts=${server.prompts ?? 0}`;
+    const permissions = server.permissions
+      ? ` permissions=tools:${server.permissions.tools},resources:${server.permissions.resources},prompts:${server.permissions.prompts}`
+      : "";
     const error = server.error ? ` error=${server.error}` : "";
-    lines.push(`  ${server.name} ${state} transport=${server.transport} status=${server.status}${tools} ${inventory}${error}`);
+    lines.push(`  ${server.name} ${state} transport=${server.transport} status=${server.status}${tools} ${inventory}${permissions}${error}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -750,6 +789,43 @@ function formatDiffSummary(payload: unknown): string {
   }
   if (diff.patch?.trim()) {
     lines.push(diff.patch.trimEnd());
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatReviewFindings(payload: unknown): string {
+  const review = payload as {
+    findings?: Array<{
+      severity?: string;
+      title?: string;
+      category?: string;
+      location?: { path?: string; line?: number };
+      recommendation?: string;
+    }>;
+    reviewedFiles?: string[];
+    summary?: string;
+  };
+  const findings = review.findings ?? [];
+  const lines = [`[review] ${findings.length} finding(s)`];
+  if (review.reviewedFiles?.length) {
+    lines.push(`Files: ${review.reviewedFiles.join(", ")}`);
+  }
+  if (review.summary) {
+    lines.push(`Summary: ${review.summary}`);
+  }
+  if (findings.length === 0) {
+    lines.push("No findings recorded.");
+    return `${lines.join("\n")}\n`;
+  }
+  for (const finding of findings) {
+    const location = finding.location?.path
+      ? ` ${finding.location.path}${finding.location.line ? `:${finding.location.line}` : ""}`
+      : "";
+    const category = finding.category ? ` ${finding.category}` : "";
+    lines.push(`  ${finding.severity ?? "unknown"}${category}${location} - ${finding.title ?? "(untitled)"}`);
+    if (finding.recommendation) {
+      lines.push(`    recommendation: ${finding.recommendation}`);
+    }
   }
   return `${lines.join("\n")}\n`;
 }

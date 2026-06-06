@@ -236,6 +236,98 @@ export interface RunloomSkillSummary {
   version?: string;
   triggers?: string[];
   requiredTools?: string[];
+  instructions?: string;
+  permissions?: RunloomSkillPermissions;
+  validation?: RunloomSkillValidation;
+  contentHash?: string;
+  diagnostics?: string[];
+}
+
+export interface RunloomSkillPermissions {
+  readWorkspace?: boolean;
+  writeWorkspace?: boolean;
+  shell?: ApprovalMode | boolean;
+}
+
+export interface RunloomSkillValidation {
+  schema: "skill-manifest@1";
+  tests?: string[];
+}
+
+export interface RunloomSkillActivation {
+  skillName: string;
+  version?: string;
+  reason: string;
+  confidence: number;
+  contextBudgetTokens: number;
+}
+
+export type RunloomSkillProposalChangeType = "create" | "update" | "disable" | "delete";
+
+export type RunloomSkillProposalStatus = "invalid" | "waiting_approval" | "approved" | "denied" | "installed";
+
+export interface RunloomSkillManifestDraft {
+  name: string;
+  description: string;
+  version?: string;
+  triggers?: string[];
+  requiredTools?: string[];
+  permissions?: RunloomSkillPermissions;
+  validation: RunloomSkillValidation;
+}
+
+export interface RunloomSkillProposalValidationResult {
+  valid: boolean;
+  diagnostics: string[];
+  tests?: string[];
+}
+
+export interface RunloomSkillRiskAssessment {
+  level: ApprovalRequest["risk"];
+  reasons: string[];
+}
+
+export interface CreateRunloomSkillProposalInput {
+  skillName?: string;
+  changeType: RunloomSkillProposalChangeType;
+  reason: string;
+  evidence?: string[];
+  manifest?: RunloomSkillManifestDraft;
+  instructions?: string;
+  diff?: string;
+}
+
+export interface CreateRunloomSkillProposalOptions {
+  sessionId?: string;
+  runId?: string;
+}
+
+export interface RunloomSkillProposal {
+  id: string;
+  skillName: string;
+  changeType: RunloomSkillProposalChangeType;
+  reason: string;
+  evidence: string[];
+  diff: string;
+  validation: RunloomSkillProposalValidationResult;
+  risk: RunloomSkillRiskAssessment;
+  status: RunloomSkillProposalStatus;
+  createdAt: string;
+  updatedAt: string;
+  runId: string;
+  sessionId: string;
+  manifest?: RunloomSkillManifestDraft;
+  instructions?: string;
+  approvalId?: string;
+  approvedAt?: string;
+  deniedAt?: string;
+  installedAt?: string;
+  diagnostics?: string[];
+}
+
+export interface ListSkillProposalsOptions {
+  status?: RunloomSkillProposalStatus;
+  limit?: number;
 }
 
 export interface McpServerSummary {
@@ -246,7 +338,142 @@ export interface McpServerSummary {
   tools?: string[];
   resources?: number;
   prompts?: number;
+  permissions?: McpPermissionPolicy;
   error?: string;
+}
+
+export type McpPermissionMode = "allow" | "ask" | "deny";
+
+export interface McpPermissionPolicy {
+  tools: McpPermissionMode;
+  resources: McpPermissionMode;
+  prompts: McpPermissionMode;
+  allowedToolNames?: string[];
+  deniedToolNames?: string[];
+}
+
+export interface McpServerConfig {
+  name: string;
+  enabled: boolean;
+  transport: McpServerSummary["transport"];
+  command?: string;
+  args?: string[];
+  url?: string;
+  permissions: McpPermissionPolicy;
+}
+
+export interface McpToolDiscovery {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+export interface McpResourceDiscovery {
+  uri: string;
+  name?: string;
+  description?: string;
+}
+
+export interface McpPromptDiscovery {
+  name: string;
+  description?: string;
+}
+
+export interface McpDiscoveryResult {
+  tools?: McpToolDiscovery[];
+  resources?: McpResourceDiscovery[];
+  prompts?: McpPromptDiscovery[];
+}
+
+export interface McpClientAdapter {
+  discover(server: McpServerConfig): Promise<McpDiscoveryResult>;
+  callTool?(server: McpServerConfig, toolName: string, input: unknown, context: ToolContext): Promise<unknown>;
+}
+
+export interface CreateRunloomMcpServerOptions {
+  name?: string;
+  readOnly?: boolean;
+  exposeRunloomTools?: boolean;
+  exposeSkills?: boolean;
+  exposeSessions?: boolean;
+  exposeMemoryQuery?: boolean;
+  exposeAgentService?: boolean;
+  allowedToolNames?: string[];
+  deniedToolNames?: string[];
+}
+
+export interface RunloomMcpServerTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  permissions?: PermissionScope[];
+  runloomToolName?: string;
+}
+
+export interface RunloomMcpServerToolCallOptions {
+  sessionId?: string;
+  runId?: string;
+  signal?: AbortSignal;
+}
+
+export interface RunloomMcpContentPart {
+  type: "text";
+  text: string;
+  mimeType?: string;
+}
+
+export interface RunloomMcpToolCallResult {
+  toolName: string;
+  runId: string;
+  sessionId: string;
+  status: ToolExecutionResult["status"] | RunResult["status"];
+  content: RunloomMcpContentPart[];
+  structuredContent?: unknown;
+  approvalId?: string;
+  isError?: boolean;
+  durationMs?: number;
+}
+
+export interface RunloomMcpServerResource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export interface RunloomMcpResourceReadResult {
+  uri: string;
+  mimeType: string;
+  text: string;
+  structuredContent?: unknown;
+}
+
+export interface RunloomMcpPromptArgument {
+  name: string;
+  description?: string;
+  required?: boolean;
+}
+
+export interface RunloomMcpPromptSummary {
+  name: string;
+  description?: string;
+  arguments?: RunloomMcpPromptArgument[];
+}
+
+export interface RunloomMcpPromptResult {
+  name: string;
+  description?: string;
+  messages: RunloomModelMessage[];
+}
+
+export interface RunloomMcpServerAdapter {
+  name: string;
+  listTools(): Promise<RunloomMcpServerTool[]>;
+  callTool(name: string, input: unknown, options?: RunloomMcpServerToolCallOptions): Promise<RunloomMcpToolCallResult>;
+  listResources(): Promise<RunloomMcpServerResource[]>;
+  readResource(uri: string): Promise<RunloomMcpResourceReadResult>;
+  listPrompts(): Promise<RunloomMcpPromptSummary[]>;
+  getPrompt(name: string, args?: Record<string, unknown>): Promise<RunloomMcpPromptResult>;
 }
 
 export interface RunloomAuditRecord {
@@ -500,6 +727,55 @@ export interface ListDeliverySummariesOptions {
   limit?: number;
 }
 
+export type RunloomReviewFindingSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+export type RunloomReviewFindingCategory =
+  | "bug"
+  | "regression"
+  | "security"
+  | "performance"
+  | "maintainability"
+  | "test_gap"
+  | "api_risk"
+  | "other";
+
+export interface RunloomReviewLocation {
+  path: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+}
+
+export interface CodeReviewFinding {
+  severity: RunloomReviewFindingSeverity;
+  title: string;
+  description: string;
+  category?: RunloomReviewFindingCategory;
+  location?: RunloomReviewLocation;
+  evidence?: string[];
+  recommendation?: string;
+}
+
+export interface CodeReviewFindings {
+  findings: CodeReviewFinding[];
+  reviewedFiles: string[];
+  summary?: string;
+}
+
+export interface RunloomReviewFindings extends CodeReviewFindings {
+  id: string;
+  runId: string;
+  sessionId: string;
+  createdAt: string;
+}
+
+export interface ListReviewFindingsOptions {
+  sessionId?: string;
+  runId?: string;
+  limit?: number;
+}
+
 export interface RunloomDiffSummary {
   filesChanged: string[];
   additions?: number;
@@ -541,22 +817,158 @@ export interface GitStatusSummary {
 
 export interface WorkspaceAdapter {
   root: string;
+  roots?: WorkspaceRoot[];
+  kind?: "local" | "virtual" | "remote" | "custom";
+  readonly?: boolean;
+  listFiles?(query?: WorkspaceFileQuery): Promise<WorkspaceFile[]>;
+  readFile?(path: string, options?: WorkspaceReadFileOptions): Promise<WorkspaceFileContent>;
+  applyPatch?(patch: UnifiedPatch, options?: ApplyPatchOptions): Promise<PatchResult>;
+  stat?(path: string): Promise<WorkspaceFileStat>;
+  getGitStatus?(): Promise<GitStatusSummary>;
+}
+
+export interface WorkspaceRoot {
+  id: string;
+  name?: string;
+  path: string;
+  readonly?: boolean;
+  virtual?: boolean;
+}
+
+export interface WorkspaceFileQuery {
+  rootId?: string;
+  path?: string;
+  recursive?: boolean;
+  maxEntries?: number;
+  includeDirectories?: boolean;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  rootId?: string;
+  type: "file" | "directory" | "symlink" | "unknown";
+  size?: number;
+  modifiedAt?: string;
+}
+
+export interface WorkspaceReadFileOptions {
+  maxBytes?: number;
+  encoding?: "utf8";
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  rootId?: string;
+  content: string;
+  encoding: "utf8";
+  truncated?: boolean;
+}
+
+export interface UnifiedPatch {
+  patch: string;
+  filesChanged?: string[];
+}
+
+export interface ApplyPatchOptions {
+  rootId?: string;
+  dryRun?: boolean;
+  allowDirty?: boolean;
+}
+
+export interface PatchResult {
+  applied: boolean;
+  diff?: RunloomDiffSummary;
+  message?: string;
+}
+
+export interface WorkspaceFileStat {
+  path: string;
+  rootId?: string;
+  type: WorkspaceFile["type"];
+  size?: number;
+  modifiedAt?: string;
+  readonly?: boolean;
 }
 
 export interface TerminalAdapter {
-  run(command: string, args?: string[]): AsyncIterable<unknown>;
+  run(command: RunloomCommand, options?: TerminalRunOptions): AsyncIterable<TerminalEvent>;
 }
 
+export interface RunloomCommand {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}
+
+export interface TerminalRunOptions {
+  cwd?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export type TerminalEvent =
+  | { type: "started"; command: string; args?: string[]; cwd?: string }
+  | { type: "stdout"; text: string }
+  | { type: "stderr"; text: string }
+  | { type: "exit"; exitCode: number; signal?: string; durationMs?: number }
+  | { type: "failed"; error: string; exitCode?: number; durationMs?: number };
+
 export interface DiffAdapter {
-  showDiff(diff: RunloomDiffSummary): Promise<void>;
+  showDiff(diff: RunloomDiffSummary, options?: ShowDiffOptions): Promise<void>;
+  showPatchPreview?(patch: UnifiedPatch): Promise<DiffDecision>;
+}
+
+export interface ShowDiffOptions {
+  title?: string;
+  runId?: string;
+  sessionId?: string;
+}
+
+export interface DiffDecision {
+  decision: "accepted" | "rejected" | "edited";
+  patch?: UnifiedPatch;
+  reason?: string;
 }
 
 export interface ApprovalBridge {
   requestApproval(request: ApprovalRequest): Promise<ApprovalDecision>;
+  onPolicyUpdated?(policy: ApprovalPolicyConfig): void;
 }
 
 export interface DiagnosticsAdapter {
-  getDiagnostics?(): Promise<unknown[]>;
+  getDiagnostics?(context?: DiagnosticsContext): Promise<RunloomDiagnostic[]>;
+}
+
+export interface DiagnosticsContext {
+  workspace: string;
+  sessionId?: string;
+  runId?: string;
+}
+
+export interface RunloomDiagnostic {
+  path: string;
+  severity: "error" | "warning" | "info" | "hint";
+  message: string;
+  source?: string;
+  line?: number;
+  column?: number;
+}
+
+export interface NotificationAdapter {
+  notify(message: RunloomNotification): Promise<void> | void;
+}
+
+export interface RunloomNotification {
+  level: "info" | "warning" | "error";
+  message: string;
+  runId?: string;
+  sessionId?: string;
+}
+
+export interface SecretAdapter {
+  getSecret(name: string): Promise<string | undefined>;
 }
 
 export interface RunloomHostAdapter {
@@ -566,6 +978,8 @@ export interface RunloomHostAdapter {
   diff?: DiffAdapter;
   approvals?: ApprovalBridge;
   diagnostics?: DiagnosticsAdapter;
+  notifications?: NotificationAdapter;
+  secrets?: SecretAdapter;
 }
 
 export interface CreateRunloomAgentOptions {
@@ -578,6 +992,7 @@ export interface CreateRunloomAgentOptions {
   approvalPolicy?: ApprovalPolicyPatch;
   host?: RunloomHostAdapter;
   logger?: RunloomLogger;
+  mcpClient?: McpClientAdapter;
 }
 
 export interface RunloomAgent {
@@ -586,8 +1001,12 @@ export interface RunloomAgent {
   listTools(): Promise<ToolSummary[]>;
   listSkills(): Promise<RunloomSkillSummary[]>;
   registerSkill(skill: RunloomSkillSummary): Promise<void>;
+  proposeSkill(input: CreateRunloomSkillProposalInput, options?: CreateRunloomSkillProposalOptions): Promise<RunloomSkillProposal>;
+  listSkillProposals(options?: ListSkillProposalsOptions): Promise<RunloomSkillProposal[]>;
+  approveSkillProposal(proposalId: string, decision?: ApprovalDecision): Promise<RunloomSkillProposal>;
   listMcpServers(): Promise<McpServerSummary[]>;
   registerMcpServer(server: McpServerSummary): Promise<void>;
+  createMcpServer(options?: CreateRunloomMcpServerOptions): RunloomMcpServerAdapter;
   listApprovals(): Promise<ApprovalRequest[]>;
   listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe;
@@ -599,6 +1018,7 @@ export interface RunloomAgent {
   listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
   listEditPlans(options?: ListEditPlansOptions): Promise<RunloomEditPlan[]>;
   listDeliverySummaries(options?: ListDeliverySummariesOptions): Promise<RunloomDeliverySummary[]>;
+  listReviewFindings(options?: ListReviewFindingsOptions): Promise<RunloomReviewFindings[]>;
   listDiffRecords(options?: ListDiffRecordsOptions): Promise<RunloomDiffRecord[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;

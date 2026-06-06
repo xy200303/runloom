@@ -70,7 +70,8 @@ export interface RunloomEventEnvelope<TPayload = unknown> {
     | "external_agent"
     | "memory"
     | "evolution"
-    | "eval";
+    | "eval"
+    | "audit";
   payload: TPayload;
 }
 
@@ -205,6 +206,22 @@ export interface McpServerSummary {
   resources?: number;
   prompts?: number;
   error?: string;
+}
+
+export interface RunloomAuditRecord {
+  id: string;
+  timestamp: string;
+  action: string;
+  actor: "user" | "host_app" | "runtime";
+  summary: string;
+  runId?: string;
+  sessionId?: string;
+  details?: unknown;
+}
+
+export interface ListAuditRecordsOptions {
+  action?: string;
+  limit?: number;
 }
 
 export interface SubmitOptions {
@@ -456,6 +473,7 @@ export interface RunloomAgent {
   listMcpServers(): Promise<McpServerSummary[]>;
   registerMcpServer(server: McpServerSummary): Promise<void>;
   listApprovals(): Promise<ApprovalRequest[]>;
+  listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe;
   listSessions(options?: ListSessionsOptions): Promise<RunloomSession[]>;
   getSession(sessionId: string): Promise<RunloomSession>;

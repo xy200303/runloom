@@ -16,6 +16,7 @@ import type {
   ApprovalRequest,
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
+  ListAuditRecordsOptions,
   ListEventsOptions,
   ListRunsOptions,
   McpServerSummary,
@@ -29,6 +30,7 @@ import type {
   RunloomAgent,
   RunloomEvent,
   RunloomEventListener,
+  RunloomAuditRecord,
   RunloomInput,
   RunloomRun,
   RunloomSession,
@@ -352,6 +354,11 @@ export class DefaultRunloomAgent implements RunloomAgent {
     }));
   }
 
+  async listAuditRecords(options: ListAuditRecordsOptions = {}): Promise<RunloomAuditRecord[]> {
+    const records = this.store.listAuditRecords(options.action);
+    return takeLast(records, options.limit).map((record) => ({ ...record }));
+  }
+
   async getSession(sessionId: string): Promise<RunloomSession> {
     const session = this.store.getSession(sessionId);
     if (!session) {
@@ -379,8 +386,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
     const events = this.bus
       .listEvents(options.sessionId)
       .filter((event) => !options.runId || event.runId === options.runId);
-    const limitedEvents = typeof options.limit === "number" && options.limit >= 0 ? events.slice(-options.limit) : events;
-    return limitedEvents.map((event) => ({ ...event }));
+    return takeLast(events, options.limit).map((event) => ({ ...event }));
   }
 
   async resume(runId: string): Promise<RunResult> {
@@ -438,8 +444,20 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async updateApprovalPolicy(patch: ApprovalPolicyPatch): Promise<ApprovalPolicyConfig> {
+    const previousPolicy = this.approvalPolicy;
     this.approvalPolicy = applyApprovalPolicyPatch(this.approvalPolicy, patch);
     this.approvalPolicyStore?.save(this.approvalPolicy);
+    this.recordAudit({
+      action: "approval.policy.updated",
+      actor: "user",
+      summary: "Approval policy updated.",
+      details: {
+        previousDefaultMode: previousPolicy.defaultMode,
+        nextDefaultMode: this.approvalPolicy.defaultMode,
+        changedScopes: patch.scopes ?? {},
+        updatedBy: this.approvalPolicy.updatedBy
+      }
+    });
     this.emit("approval.policy.updated", "approval", "policy", "global", this.approvalPolicy);
     return this.approvalPolicy;
   }
@@ -668,6 +686,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
     });
   }
 
+  private recordAudit(input: Omit<RunloomAuditRecord, "id" | "timestamp">): void {
+    const record: RunloomAuditRecord = {
+      id: `audit_${randomUUID()}`,
+      timestamp: new Date().toISOString(),
+      ...input
+    };
+    this.store.appendAuditRecord(record);
+    this.emit("audit.recorded", "audit", input.runId ?? "audit", input.sessionId ?? "global", record);
+  }
+
   private updateStoredRun(runId: string, patch: Partial<RunloomRun>): void {
     const storedRun = this.runs.get(runId);
     if (!storedRun) {
@@ -688,6 +716,16 @@ function cloneRun(run: RunloomRun): RunloomRun {
   return {
     ...run
   };
+}
+
+function takeLast<TItem>(items: TItem[], limit?: number): TItem[] {
+  if (typeof limit !== "number" || limit < 0) {
+    return items;
+  }
+  if (limit === 0) {
+    return [];
+  }
+  return items.slice(-limit);
 }
 
 function stringifyToolResult(result: ToolExecutionResult): string {

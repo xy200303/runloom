@@ -40,7 +40,7 @@
 - [x] 实现基础工具注册和工具执行器。
 - [x] 实现 approval request/resolution。
 - [x] 实现 approval policy：完全访问、请求批准、替我决定三种模式。
-- [ ] 支持按 permission scope 修改审批模式，并写入 audit trail。
+- [x] 支持按 permission scope 修改审批模式，并写入 audit trail。
 - [x] 实现 `~/.runloom/config.json` 全局配置读取，支持默认模型、provider 偏好和非敏感用户偏好。
 - [x] 支持 workspace `.runloom/config.json` 覆盖全局配置，但禁止在仓库配置中保存 secret。
 - [x] 实现任务画像模型路由：前端设计、Go 开发、原型设计、代码审查和测试修复可以命中不同模型。

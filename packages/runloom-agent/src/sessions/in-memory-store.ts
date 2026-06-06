@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { ApprovalDecision, ApprovalRequest, RunloomSession } from "../types.js";
+import type { ApprovalDecision, ApprovalRequest, RunloomAuditRecord, RunloomSession } from "../types.js";
 
 export class InMemorySessionStore {
   private readonly sessions = new Map<string, RunloomSession>();
   private readonly approvals = new Map<string, ApprovalRequest>();
   private readonly approvalDecisions = new Map<string, ApprovalDecision>();
+  private readonly auditRecords: RunloomAuditRecord[] = [];
 
   createSession(workspace: string): RunloomSession {
     const now = new Date().toISOString();
@@ -49,5 +50,13 @@ export class InMemorySessionStore {
   resolveApproval(approvalId: string, decision: ApprovalDecision): void {
     this.approvalDecisions.set(approvalId, decision);
     this.approvals.delete(approvalId);
+  }
+
+  appendAuditRecord(record: RunloomAuditRecord): void {
+    this.auditRecords.push(record);
+  }
+
+  listAuditRecords(action?: string): RunloomAuditRecord[] {
+    return this.auditRecords.filter((record) => !action || record.action === action);
   }
 }

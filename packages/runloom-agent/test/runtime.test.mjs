@@ -16,6 +16,8 @@ test("approval policy can be updated", async () => {
     workspace: process.cwd(),
     apiKey: ""
   });
+  const eventTypes = [];
+  agent.subscribe((event) => eventTypes.push(event.type));
 
   const policy = await agent.updateApprovalPolicy({
     scopes: {
@@ -23,9 +25,20 @@ test("approval policy can be updated", async () => {
       shell: "auto_decide"
     }
   });
+  const auditRecords = await agent.listAuditRecords({ action: "approval.policy.updated" });
+  const emptyAuditRecords = await agent.listAuditRecords({ action: "approval.policy.updated", limit: 0 });
 
   assert.equal(policy.scopes["filesystem.write"], "ask");
   assert.equal(policy.scopes.shell, "auto_decide");
+  assert.equal(auditRecords.length, 1);
+  assert.equal(emptyAuditRecords.length, 0);
+  assert.equal(auditRecords[0].action, "approval.policy.updated");
+  assert.equal(auditRecords[0].actor, "user");
+  assert.deepEqual(auditRecords[0].details.changedScopes, {
+    "filesystem.write": "ask",
+    shell: "auto_decide"
+  });
+  assert.ok(eventTypes.includes("audit.recorded"));
   await agent.close();
 });
 
@@ -482,6 +495,7 @@ test("runs and events can be queried through the public API", async () => {
   const allEvents = await agent.listEvents({ sessionId: result.sessionId });
   const runEvents = await agent.listEvents({ runId: result.runId });
   const lastEvent = await agent.listEvents({ runId: result.runId, limit: 1 });
+  const noEvents = await agent.listEvents({ runId: result.runId, limit: 0 });
 
   assert.equal(run.id, result.runId);
   assert.equal(run.sessionId, result.sessionId);
@@ -494,6 +508,7 @@ test("runs and events can be queried through the public API", async () => {
   assert.ok(runEvents.every((event) => event.runId === result.runId));
   assert.equal(lastEvent.length, 1);
   assert.equal(lastEvent[0].type, "run.completed");
+  assert.deepEqual(noEvents, []);
   await agent.close();
 });
 

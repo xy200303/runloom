@@ -35,7 +35,7 @@
 - [ ] 实现 session、run、message、event 基础 store。
 - [x] 接入至少一个真实模型协议 adapter，保证最小 runtime 不依赖 mock 数据。
 - [x] 测试代码可提供 test-only provider，覆盖文本输出、tool call 和错误注入。
-- [~] 实现最小动态 loop：已实现 submit、subscribe、active run cancel；仍需 resume 和持久化 run 恢复。
+- [~] 实现最小动态 loop：已实现 submit、subscribe、active run cancel 和同进程 in-memory resume；仍需持久化 run 恢复与 approval 后续接续。
 - [x] 实现 todo store 和 `todo.updated` 事件。
 - [x] 实现基础工具注册和工具执行器。
 - [ ] 实现 approval request/resolution。
@@ -131,7 +131,7 @@
 - [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态和 todo；仍需完整 activity panel 与事件回放。
 - [ ] approval 弹窗。
 - [ ] `/permissions` 权限审批设置面板。
-- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/skills`、`/mcp`、`/quit`；仍需 `/resume`。
+- [x] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/quit`。
 - [ ] 事件回放和滚动。
 
 验收标准：

@@ -64,6 +64,15 @@ interface NormalizedSubmitInput {
   language?: string;
 }
 
+interface StoredRun {
+  runId: string;
+  sessionId: string;
+  input: NormalizedSubmitInput;
+  status: RunResult["status"] | "running";
+  outputText?: string;
+  approvalId?: string;
+}
+
 export class DefaultRunloomAgent implements RunloomAgent {
   private readonly workspace: string;
   private readonly bus = new RunloomEventBus();
@@ -72,6 +81,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly tools = new Map<string, ToolDefinition>();
   private readonly skills = new Map<string, RunloomSkillSummary>();
   private readonly mcpServers = new Map<string, McpServerSummary>();
+  private readonly runs = new Map<string, StoredRun>();
   private readonly approvalPolicyStore?: FileApprovalPolicyStore;
   private readonly config: RunloomConfig;
   private readonly toolExecutor: ToolExecutor;
@@ -123,6 +133,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
       options.signal?.addEventListener("abort", abortFromParent, { once: true });
     }
     this.activeRuns.set(runId, { sessionId: session.id, controller });
+    this.runs.set(runId, {
+      runId,
+      sessionId: session.id,
+      input: { ...request },
+      status: "running"
+    });
 
     this.emit("run.started", "runtime", runId, session.id, {
       input: text,
@@ -171,6 +187,11 @@ export class DefaultRunloomAgent implements RunloomAgent {
           outputText: modelResult.outputText,
           approvalId: modelResult.approvalId
         });
+        this.updateStoredRun(runId, {
+          status: "waiting_approval",
+          outputText: modelResult.outputText,
+          approvalId: modelResult.approvalId
+        });
         this.store.touchSession(session.id);
         return {
           runId,
@@ -190,6 +211,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
       this.emit("run.completed", "runtime", runId, session.id, {
         outputText: modelResult.outputText
       });
+      this.updateStoredRun(runId, {
+        status: "completed",
+        outputText: modelResult.outputText
+      });
       this.store.touchSession(session.id);
 
       return {
@@ -203,6 +228,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
         this.emit("run.cancelled", "runtime", runId, session.id, {
           reason: "cancelled"
         });
+        this.updateStoredRun(runId, {
+          status: "cancelled",
+          outputText: "Run cancelled."
+        });
         this.store.touchSession(session.id);
         return {
           runId,
@@ -215,6 +244,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
       const message = error instanceof Error ? error.message : String(error);
       this.emit("run.failed", "runtime", runId, session.id, {
         error: message
+      });
+      this.updateStoredRun(runId, {
+        status: "failed",
+        outputText: message
       });
 
       return {
@@ -312,7 +345,29 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async resume(runId: string): Promise<RunResult> {
-    throw new Error(`Run resume is not implemented yet: ${runId}`);
+    const storedRun = this.runs.get(runId);
+    if (!storedRun) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    if (storedRun.status === "running") {
+      throw new Error(`Run is still running: ${runId}`);
+    }
+    this.emit("run.resumed", "runtime", runId, storedRun.sessionId, {
+      originalRunId: runId,
+      status: storedRun.status
+    });
+    return this.submit(
+      {
+        text: storedRun.input.text,
+        model: storedRun.input.model,
+        profile: storedRun.input.profile,
+        taskType: storedRun.input.taskType,
+        language: storedRun.input.language
+      },
+      {
+        sessionId: storedRun.sessionId
+      }
+    );
   }
 
   async cancel(runId: string): Promise<void> {
@@ -570,6 +625,17 @@ export class DefaultRunloomAgent implements RunloomAgent {
       timestamp: new Date().toISOString(),
       source,
       payload
+    });
+  }
+
+  private updateStoredRun(runId: string, patch: Partial<StoredRun>): void {
+    const storedRun = this.runs.get(runId);
+    if (!storedRun) {
+      return;
+    }
+    this.runs.set(runId, {
+      ...storedRun,
+      ...patch
     });
   }
 }

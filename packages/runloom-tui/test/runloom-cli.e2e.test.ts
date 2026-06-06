@@ -20,6 +20,7 @@ describe("runloom CLI e2e", () => {
           "/review",
           "/review off",
           "/stop",
+          "/resume run_missing",
           "/skills",
           "/mcp",
           "/model profile frontend_design",
@@ -42,6 +43,7 @@ describe("runloom CLI e2e", () => {
       expect(result.stdout).toContain("Review mode enabled");
       expect(result.stdout).toContain("Review mode disabled");
       expect(result.stdout).toContain("Stop requested for");
+      expect(result.stdout).toContain("Resume failed: Run not found");
       expect(result.stdout).toContain("Skills: (none registered)");
       expect(result.stdout).toContain("MCP servers: (none registered)");
       expect(result.stdout).toContain("Model profile set to frontend_design");

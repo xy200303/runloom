@@ -170,6 +170,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         }
         output.write(`[run] cancelled ${event.runId}\n\n`);
         break;
+      case "run.resumed":
+        output.write(`[run] resumed ${event.runId}\n`);
+        break;
       case "run.completed":
         output.write("[run] completed\n\n");
         break;
@@ -212,6 +215,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /diff          Show current git diff",
           "  /review        Enable code review mode",
           "  /stop          Stop the active run",
+          "  /resume        Resume a previous run",
           "  /skills        List registered skills",
           "  /mcp           List MCP servers",
           "  /git           Show git status",
@@ -256,6 +260,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     if (command === "/stop") {
       await this.handleStopCommand();
+      return;
+    }
+
+    if (command === "/resume" || command.startsWith("/resume ")) {
+      await this.handleResumeCommand(command);
       return;
     }
 
@@ -387,6 +396,25 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     const runId = this.activeRunId;
     await this.options.agent.cancel(runId);
     output.write(`Stop requested for ${runId}\n`);
+  }
+
+  private async handleResumeCommand(command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const [, runIdArg] = command.split(/\s+/);
+    const runId = runIdArg ?? this.activeRunId;
+    if (!runId) {
+      output.write("No run to resume\n");
+      return;
+    }
+    try {
+      const result = await this.options.agent.resume(runId);
+      this.activeRunId = result.runId;
+      this.activeSessionId = result.sessionId;
+      output.write(`[resume] ${runId} -> ${result.runId} ${result.status}\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      output.write(`Resume failed: ${message}\n`);
+    }
   }
 
   private trackToolSession(result: ToolExecutionResult): void {

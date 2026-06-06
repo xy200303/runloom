@@ -16,6 +16,7 @@ test("approval command updates scope and default modes", async () => {
   const submissions = [];
   const toolCalls = [];
   const cancelCalls = [];
+  const resumeCalls = [];
   const sessions = [
     {
       id: "ses_tool",
@@ -88,6 +89,15 @@ test("approval command updates scope and default modes", async () => {
     },
     async cancel(runId) {
       cancelCalls.push(runId);
+    },
+    async resume(runId) {
+      resumeCalls.push(runId);
+      return {
+        runId: "run_resumed",
+        sessionId: "ses_tool",
+        status: "completed",
+        outputText: "resumed"
+      };
     },
     async executeTool(name, input) {
       toolCalls.push({ name, input });
@@ -190,6 +200,7 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
   await app.runCommand("/stop");
+  await app.runCommand("/resume run_tool");
   await app.runCommand("/model profile frontend_design");
   await app.submitPrompt("设计一个前端界面");
   await app.runCommand("/model set kimi:kimi-design");
@@ -218,6 +229,7 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /\[tests\] pnpm typecheck exit=0 duration=12ms/);
   assert.match(text, /tests ok/);
   assert.match(text, /Stop requested for run_tool/);
+  assert.match(text, /\[resume\] run_tool -> run_resumed completed/);
   assert.match(text, /Model profile set to frontend_design/);
   assert.match(text, /Model override set to kimi:kimi-design/);
   assert.match(text, /Review mode enabled/);
@@ -234,6 +246,7 @@ test("approval command updates scope and default modes", async () => {
   assert.deepEqual(toolCalls[1], { name: "git.diff", input: {} });
   assert.deepEqual(toolCalls[2], { name: "shell.verify", input: { command: "pnpm", args: ["typecheck"] } });
   assert.deepEqual(cancelCalls, ["run_tool"]);
+  assert.deepEqual(resumeCalls, ["run_tool"]);
 });
 
 class MemoryOutput extends Writable {

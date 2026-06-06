@@ -438,6 +438,32 @@ test("agent cancel aborts an active run", async () => {
   await agent.close();
 });
 
+test("agent resume replays a stored run in the same session", async () => {
+  const provider = new RecordingProvider("resume-provider");
+  const agent = await createRunloomAgent({
+    provider,
+    model: "gpt-4.1",
+    workspace: process.cwd()
+  });
+
+  const eventTypes = [];
+  agent.subscribe((event) => eventTypes.push(event.type));
+
+  const first = await agent.submit({
+    text: "继续同一个任务",
+    taskType: "code_review"
+  });
+  const resumed = await agent.resume(first.runId);
+
+  assert.equal(first.status, "completed");
+  assert.equal(resumed.status, "completed");
+  assert.notEqual(resumed.runId, first.runId);
+  assert.equal(resumed.sessionId, first.sessionId);
+  assert.equal(provider.requests.length, 2);
+  assert.ok(eventTypes.includes("run.resumed"));
+  await agent.close();
+});
+
 test("built-in coding tools operate on real workspace data", async () => {
   const agent = await createRunloomAgent({
     provider: "openai-responses",

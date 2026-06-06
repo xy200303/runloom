@@ -103,6 +103,23 @@ export interface RunResult {
   approvalId?: string;
 }
 
+export type RunloomRunStatus = RunResult["status"] | "running";
+
+export interface RunloomRun {
+  id: string;
+  sessionId: string;
+  status: RunloomRunStatus;
+  inputText: string;
+  createdAt: string;
+  updatedAt: string;
+  outputText?: string;
+  approvalId?: string;
+  model?: string;
+  profile?: string;
+  taskType?: string;
+  language?: string;
+}
+
 export type RunloomTaskType =
   | "frontend_design"
   | "go_development"
@@ -206,6 +223,16 @@ export interface SubscribeOptions {
 
 export interface ListSessionsOptions {
   workspace?: string;
+}
+
+export interface ListRunsOptions {
+  sessionId?: string;
+}
+
+export interface ListEventsOptions {
+  sessionId?: string;
+  runId?: string;
+  limit?: number;
 }
 
 export interface RunloomInput {
@@ -432,6 +459,9 @@ export interface RunloomAgent {
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe;
   listSessions(options?: ListSessionsOptions): Promise<RunloomSession[]>;
   getSession(sessionId: string): Promise<RunloomSession>;
+  listRuns(options?: ListRunsOptions): Promise<RunloomRun[]>;
+  getRun(runId: string): Promise<RunloomRun>;
+  listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;
   resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void>;

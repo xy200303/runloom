@@ -32,7 +32,7 @@
 ## Phase 1：runloom-agent 最小 runtime
 
 - [x] 定义 public API：`createRunloomAgent`、`RunloomAgent`、`RunloomEvent`、`ModelProvider`、`ToolDefinition`。
-- [ ] 实现 session、run、message、event 基础 store。
+- [~] 实现 session、run、message、event 基础 store：已实现 in-memory session/run/event 查询；仍需 message store 和持久化 store。
 - [x] 接入至少一个真实模型协议 adapter，保证最小 runtime 不依赖 mock 数据。
 - [x] 测试代码可提供 test-only provider，覆盖文本输出、tool call 和错误注入。
 - [~] 实现最小动态 loop：已实现 submit、subscribe、active run cancel 和同进程 in-memory resume；仍需持久化 run 恢复与 approval 后续接续。

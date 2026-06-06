@@ -464,6 +464,39 @@ test("agent resume replays a stored run in the same session", async () => {
   await agent.close();
 });
 
+test("runs and events can be queried through the public API", async () => {
+  const provider = new RecordingProvider("query-provider");
+  const agent = await createRunloomAgent({
+    provider,
+    model: "gpt-4.1",
+    workspace: process.cwd()
+  });
+
+  const result = await agent.submit({
+    text: "查询 run 和 event",
+    taskType: "general"
+  });
+
+  const run = await agent.getRun(result.runId);
+  const runs = await agent.listRuns({ sessionId: result.sessionId });
+  const allEvents = await agent.listEvents({ sessionId: result.sessionId });
+  const runEvents = await agent.listEvents({ runId: result.runId });
+  const lastEvent = await agent.listEvents({ runId: result.runId, limit: 1 });
+
+  assert.equal(run.id, result.runId);
+  assert.equal(run.sessionId, result.sessionId);
+  assert.equal(run.status, "completed");
+  assert.equal(run.inputText, "查询 run 和 event");
+  assert.equal(run.outputText, result.outputText);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].id, result.runId);
+  assert.ok(allEvents.some((event) => event.type === "run.started"));
+  assert.ok(runEvents.every((event) => event.runId === result.runId));
+  assert.equal(lastEvent.length, 1);
+  assert.equal(lastEvent[0].type, "run.completed");
+  await agent.close();
+});
+
 test("built-in coding tools operate on real workspace data", async () => {
   const agent = await createRunloomAgent({
     provider: "openai-responses",

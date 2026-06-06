@@ -46,6 +46,9 @@ export interface RunloomAgent {
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe;
   listSessions(options?: ListSessionsOptions): Promise<RunloomSession[]>;
   getSession(sessionId: string): Promise<RunloomSession>;
+  listRuns(options?: ListRunsOptions): Promise<RunloomRun[]>;
+  getRun(runId: string): Promise<RunloomRun>;
+  listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;
   resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void>;
@@ -62,6 +65,9 @@ export interface RunloomAgent {
 - `CreateRunloomAgentOptions`
 - `RunloomEvent`
 - `RunloomSession`
+- `RunloomRun`
+- `ListRunsOptions`
+- `ListEventsOptions`
 - `RunloomTodoItem`
 - `ApprovalMode`
 - `ApprovalPolicyConfig`

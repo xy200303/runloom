@@ -16,6 +16,8 @@ import type {
   ApprovalRequest,
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
+  ListEventsOptions,
+  ListRunsOptions,
   McpServerSummary,
   ModelSelectionResult,
   ModelProvider,
@@ -28,6 +30,7 @@ import type {
   RunloomEvent,
   RunloomEventListener,
   RunloomInput,
+  RunloomRun,
   RunloomSession,
   RunloomSkillSummary,
   RunloomTodoItem,
@@ -66,12 +69,8 @@ interface NormalizedSubmitInput {
 }
 
 interface StoredRun {
-  runId: string;
-  sessionId: string;
+  run: RunloomRun;
   input: NormalizedSubmitInput;
-  status: RunResult["status"] | "running";
-  outputText?: string;
-  approvalId?: string;
 }
 
 export class DefaultRunloomAgent implements RunloomAgent {
@@ -126,6 +125,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
     const text = request.text;
     const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
     const runId = `run_${randomUUID()}`;
+    const now = new Date().toISOString();
     const controller = new AbortController();
     const abortFromParent = () => controller.abort();
     if (options.signal?.aborted) {
@@ -135,10 +135,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
     }
     this.activeRuns.set(runId, { sessionId: session.id, controller });
     this.runs.set(runId, {
-      runId,
-      sessionId: session.id,
-      input: { ...request },
-      status: "running"
+      run: {
+        id: runId,
+        sessionId: session.id,
+        status: "running",
+        inputText: request.text,
+        createdAt: now,
+        updatedAt: now,
+        model: request.model,
+        profile: request.profile,
+        taskType: request.taskType,
+        language: request.language
+      },
+      input: { ...request }
     });
 
     this.emit("run.started", "runtime", runId, session.id, {
@@ -351,17 +360,40 @@ export class DefaultRunloomAgent implements RunloomAgent {
     return session;
   }
 
+  async listRuns(options: ListRunsOptions = {}): Promise<RunloomRun[]> {
+    return [...this.runs.values()]
+      .map((storedRun) => cloneRun(storedRun.run))
+      .filter((run) => !options.sessionId || run.sessionId === options.sessionId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async getRun(runId: string): Promise<RunloomRun> {
+    const storedRun = this.runs.get(runId);
+    if (!storedRun) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    return cloneRun(storedRun.run);
+  }
+
+  async listEvents(options: ListEventsOptions = {}): Promise<RunloomEvent[]> {
+    const events = this.bus
+      .listEvents(options.sessionId)
+      .filter((event) => !options.runId || event.runId === options.runId);
+    const limitedEvents = typeof options.limit === "number" && options.limit >= 0 ? events.slice(-options.limit) : events;
+    return limitedEvents.map((event) => ({ ...event }));
+  }
+
   async resume(runId: string): Promise<RunResult> {
     const storedRun = this.runs.get(runId);
     if (!storedRun) {
       throw new Error(`Run not found: ${runId}`);
     }
-    if (storedRun.status === "running") {
+    if (storedRun.run.status === "running") {
       throw new Error(`Run is still running: ${runId}`);
     }
-    this.emit("run.resumed", "runtime", runId, storedRun.sessionId, {
+    this.emit("run.resumed", "runtime", runId, storedRun.run.sessionId, {
       originalRunId: runId,
-      status: storedRun.status
+      status: storedRun.run.status
     });
     return this.submit(
       {
@@ -372,7 +404,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         language: storedRun.input.language
       },
       {
-        sessionId: storedRun.sessionId
+        sessionId: storedRun.run.sessionId
       }
     );
   }
@@ -636,16 +668,26 @@ export class DefaultRunloomAgent implements RunloomAgent {
     });
   }
 
-  private updateStoredRun(runId: string, patch: Partial<StoredRun>): void {
+  private updateStoredRun(runId: string, patch: Partial<RunloomRun>): void {
     const storedRun = this.runs.get(runId);
     if (!storedRun) {
       return;
     }
     this.runs.set(runId, {
       ...storedRun,
-      ...patch
+      run: {
+        ...storedRun.run,
+        ...patch,
+        updatedAt: new Date().toISOString()
+      }
     });
   }
+}
+
+function cloneRun(run: RunloomRun): RunloomRun {
+  return {
+    ...run
+  };
 }
 
 function stringifyToolResult(result: ToolExecutionResult): string {

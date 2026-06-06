@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -549,6 +550,68 @@ test("built-in coding tools operate on real workspace data", async () => {
   await agent.close();
 });
 
+test("file patch tool is guarded and applies exact replacements", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "runloom-fs-patch-"));
+  const filePath = join(workspace, "sample.txt");
+  const initialContent = "alpha\nbeta\n";
+
+  try {
+    await writeFile(filePath, initialContent);
+
+    const defaultAgent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace,
+      apiKey: ""
+    });
+    const waiting = await defaultAgent.executeTool("fs.patch", {
+      path: "sample.txt",
+      before: "beta",
+      after: "gamma"
+    });
+    assert.equal(waiting.status, "waiting_approval");
+    assert.ok(waiting.approvalId);
+    await defaultAgent.close();
+
+    const fullAccessAgent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace,
+      apiKey: "",
+      approvalPolicy: {
+        scopes: {
+          "filesystem.write": "full_access"
+        }
+      }
+    });
+    const result = await fullAccessAgent.executeTool("fs.patch", {
+      path: "sample.txt",
+      before: "beta",
+      after: "gamma",
+      expectedSha256: sha256(initialContent)
+    });
+    const mismatchedHash = await fullAccessAgent.executeTool("fs.patch", {
+      path: "sample.txt",
+      before: "gamma",
+      after: "delta",
+      expectedSha256: sha256(initialContent)
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.output.path, "sample.txt");
+    assert.equal(result.output.replacements, 1);
+    assert.equal(result.output.filesChanged[0], "sample.txt");
+    assert.match(result.output.patch, /-beta/);
+    assert.match(result.output.patch, /\+gamma/);
+    assert.equal(await readFile(filePath, "utf8"), "alpha\ngamma\n");
+    assert.equal(mismatchedHash.status, "failed");
+    assert.match(mismatchedHash.error, /expected sha256/);
+    await fullAccessAgent.close();
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("git diff tool reads a real workspace patch", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "runloom-git-diff-"));
 
@@ -592,11 +655,14 @@ test("built-in tools can be listed for host adapters", async () => {
 
   const tools = await agent.listTools();
   const readTool = tools.find((tool) => tool.name === "fs.read");
+  const patchTool = tools.find((tool) => tool.name === "fs.patch");
   const shellTool = tools.find((tool) => tool.name === "shell.verify");
   const diffTool = tools.find((tool) => tool.name === "git.diff");
 
   assert.ok(readTool);
   assert.equal(readTool.permissions[0], "filesystem.read");
+  assert.ok(patchTool);
+  assert.equal(patchTool.permissions[0], "filesystem.write");
   assert.ok(shellTool);
   assert.equal(shellTool.permissions[0], "shell");
   assert.ok(diffTool);
@@ -733,4 +799,8 @@ function waitForAbort(signal) {
       { once: true }
     );
   });
+}
+
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex");
 }

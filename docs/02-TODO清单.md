@@ -58,7 +58,7 @@
 
 ## Phase 1.5：专业编程开发闭环
 
-- [ ] 文件工具：list/read/search/write/patch，全部受 workspace guard 和 approval policy 控制。
+- [x] 文件工具：list/read/search/write/patch，全部受 workspace guard 和 approval policy 控制。
 - [~] Diff 工具：已实现 `diff.text` 和 `git.diff` unified diff 摘要；仍需持久化 diff record 与宿主 diff adapter 展示。
 - [x] Shell 验证工具：运行用户或项目配置的 typecheck/test/build 命令。
 - [x] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
@@ -18,6 +18,7 @@ export function createBuiltInCodingTools(): ToolDefinition[] {
     createReadFileTool(),
     createSearchFilesTool(),
     createWriteFileTool(),
+    createPatchFileTool(),
     createDiffTextTool(),
     createVerifyCommandTool(),
     createGitStatusTool(),
@@ -160,6 +161,64 @@ function createWriteFileTool(): ToolDefinition<{ path: string; content: string }
       return {
         path: relative(context.workspace, target),
         bytes: Buffer.byteLength(input.content)
+      };
+    }
+  };
+}
+
+function createPatchFileTool(): ToolDefinition<
+  { path: string; before: string; after: string; expectedSha256?: string; replaceAll?: boolean },
+  RunloomDiffSummary & { path: string; bytes: number; replacements: number; sha256Before: string; sha256After: string }
+> {
+  return {
+    name: "fs.patch",
+    description: "Apply an exact text replacement patch inside the workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        before: { type: "string" },
+        after: { type: "string" },
+        expectedSha256: { type: "string" },
+        replaceAll: { type: "boolean" }
+      },
+      required: ["path", "before", "after"],
+      additionalProperties: false
+    },
+    permissions: ["filesystem.write"],
+    async execute(input, context) {
+      if (input.before.length === 0) {
+        throw new Error("fs.patch requires a non-empty before text.");
+      }
+
+      const target = await resolveExistingWorkspacePath(context.workspace, input.path);
+      const filePath = relative(context.workspace, target);
+      const content = await readFile(target, "utf8");
+      const sha256Before = sha256(content);
+      if (input.expectedSha256 && input.expectedSha256 !== sha256Before) {
+        throw new Error(`fs.patch expected sha256 ${input.expectedSha256}, but found ${sha256Before}.`);
+      }
+
+      const occurrences = countOccurrences(content, input.before);
+      if (occurrences === 0) {
+        throw new Error(`fs.patch could not find the before text in ${filePath}.`);
+      }
+      if (occurrences > 1 && !input.replaceAll) {
+        throw new Error(`fs.patch found ${occurrences} matches in ${filePath}; set replaceAll to patch all matches.`);
+      }
+
+      const nextContent = input.replaceAll ? content.split(input.before).join(input.after) : content.replace(input.before, input.after);
+      await writeFile(target, nextContent, "utf8");
+      const patch = createUnifiedDiff(content, nextContent, filePath);
+      const sha256After = sha256(nextContent);
+
+      return {
+        ...summarizePatch(patch, filePath),
+        path: filePath,
+        bytes: Buffer.byteLength(nextContent),
+        replacements: input.replaceAll ? occurrences : 1,
+        sha256Before,
+        sha256After
       };
     }
   };
@@ -414,4 +473,18 @@ function parseGitNumstatValue(value: string | undefined): number {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function countOccurrences(text: string, search: string): number {
+  let count = 0;
+  let index = text.indexOf(search);
+  while (index !== -1) {
+    count += 1;
+    index = text.indexOf(search, index + search.length);
+  }
+  return count;
+}
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
 }

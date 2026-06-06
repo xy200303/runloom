@@ -188,6 +188,8 @@ await agent.updateApprovalPolicy({
 ## Security Behavior
 
 - 内置文件工具和 `shell.verify` 的 `cwd` 都必须通过 workspace path guard，不能通过 `..`、绝对路径或 symlink 访问 workspace 外部路径。
+- 内置文件工具包括 `fs.list`、`fs.read`、`fs.search`、`fs.write` 和 `fs.patch`；写入和 patch 使用 `filesystem.write` approval scope。
+- `fs.patch` 使用精确文本替换，支持 `expectedSha256` 校验来避免在文件内容已变化时继续应用旧补丁。
 - `full_access` 只是在 guardrails 内自动放行，不会绕过 workspace guard、redaction、trace 或 audit。
 - 工具输出、approval details、事件 payload、模型可见的工具结果和模型输出都会做初版 redaction，覆盖 secret-like key/value、Bearer token、常见 provider key 形态和本地 workspace 绝对路径。
 - redaction 后的文本不可恢复原文；如果宿主 UI 需要展示敏感内容，必须走后续专门的 approval/secret adapter，而不是从事件流或工具结果中读取。

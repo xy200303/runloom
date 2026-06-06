@@ -127,6 +127,92 @@ test("approval command updates scope and default modes", async () => {
     async listSessions() {
       return sessions;
     },
+    async listEvents() {
+      return [
+        {
+          id: "evt_replay_run",
+          type: "run.started",
+          runId: "run_replay",
+          sessionId: "ses_tool",
+          sequence: 1,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          source: "runtime",
+          payload: {
+            input: "Replay a stored task"
+          }
+        },
+        {
+          id: "evt_replay_model",
+          type: "model.selection.resolved",
+          runId: "run_replay",
+          sessionId: "ses_tool",
+          sequence: 2,
+          timestamp: "2026-01-01T00:00:02.000Z",
+          source: "runtime",
+          payload: {
+            providerId: "openai-responses",
+            model: "gpt-test",
+            source: "default",
+            reason: "configured default model"
+          }
+        },
+        {
+          id: "evt_replay_delta",
+          type: "response.output_text.delta",
+          runId: "run_replay",
+          sessionId: "ses_tool",
+          sequence: 3,
+          timestamp: "2026-01-01T00:00:03.000Z",
+          source: "model",
+          payload: {
+            delta: "Replay answer."
+          }
+        },
+        {
+          id: "evt_replay_completed",
+          type: "response.completed",
+          runId: "run_replay",
+          sessionId: "ses_tool",
+          sequence: 4,
+          timestamp: "2026-01-01T00:00:04.000Z",
+          source: "model",
+          payload: {
+            finishReason: "stop"
+          }
+        },
+        {
+          id: "evt_replay_todo",
+          type: "todo.updated",
+          runId: "run_replay",
+          sessionId: "ses_tool",
+          sequence: 5,
+          timestamp: "2026-01-01T00:00:05.000Z",
+          source: "runtime",
+          payload: {
+            items: [
+              {
+                id: "todo_replay",
+                title: "Replay stored events",
+                status: "completed",
+                updatedAt: "2026-01-01T00:00:05.000Z"
+              }
+            ]
+          }
+        },
+        {
+          id: "evt_replay_run_completed",
+          type: "run.completed",
+          runId: "run_replay",
+          sessionId: "ses_tool",
+          sequence: 6,
+          timestamp: "2026-01-01T00:00:06.000Z",
+          source: "runtime",
+          payload: {
+            outputText: "Replay answer."
+          }
+        }
+      ];
+    },
     async getSession(sessionId) {
       const session = sessions.find((item) => item.id === sessionId);
       if (!session) {
@@ -228,6 +314,57 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/session");
   await app.runCommand("/session list");
   app.render({
+    id: "evt_run",
+    type: "run.started",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 0,
+    timestamp: "2026-01-01T00:00:01.000Z",
+    source: "runtime",
+    payload: {
+      input: "Check TUI commands"
+    }
+  });
+  app.render({
+    id: "evt_model",
+    type: "model.selection.resolved",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 1,
+    timestamp: "2026-01-01T00:00:01.500Z",
+    source: "runtime",
+    payload: {
+      providerId: "openai-responses",
+      model: "gpt-test",
+      source: "default",
+      reason: "configured default model"
+    }
+  });
+  app.render({
+    id: "evt_delta",
+    type: "response.output_text.delta",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 2,
+    timestamp: "2026-01-01T00:00:01.700Z",
+    source: "model",
+    payload: {
+      delta: "Working on it."
+    }
+  });
+  app.render({
+    id: "evt_completed",
+    type: "response.completed",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 3,
+    timestamp: "2026-01-01T00:00:01.900Z",
+    source: "model",
+    payload: {
+      finishReason: "stop"
+    }
+  });
+  app.render({
     id: "evt_todo",
     type: "todo.updated",
     runId: "run_tool",
@@ -271,11 +408,16 @@ test("approval command updates scope and default modes", async () => {
       ]
     }
   });
+  await app.runCommand("/status");
+  await app.runCommand("/transcript");
+  await app.runCommand("/activity");
+  await app.runCommand("/view");
   await app.runCommand("/todo");
   await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
   await app.runCommand("/stop");
   await app.runCommand("/resume run_tool");
+  await app.runCommand("/replay");
   await app.runCommand("/model profile frontend_design");
   await app.submitPrompt("设计一个前端界面");
   await app.runCommand("/model set kimi:kimi-design");
@@ -301,6 +443,13 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /\[git\] main \(clean\)/);
   assert.match(text, /Session: ses_tool/);
   assert.match(text, /Sessions:/);
+  assert.match(text, /Status:\n {2}session: ses_tool/);
+  assert.match(text, /run: run_tool status=running/);
+  assert.match(text, /model: openai-responses:gpt-test/);
+  assert.match(text, /todo: in_progress=1/);
+  assert.match(text, /Transcript:\n {2}user: Check TUI commands/);
+  assert.match(text, /assistant: Working on it\./);
+  assert.match(text, /Activity:\n(?:.*\n)* {2}model completed/);
   assert.match(text, /Todo:\n {2}in_progress Check TUI commands/);
   assert.match(text, /\[review\] 1 finding\(s\)/);
   assert.match(text, /Files: packages\/runloom-tui\/src\/app\/tui-app\.ts/);
@@ -312,6 +461,10 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /tests ok/);
   assert.match(text, /Stop requested for run_tool/);
   assert.match(text, /\[resume\] run_tool -> run_resumed completed/);
+  assert.match(text, /\[replay\] loaded 6 event\(s\)/);
+  assert.match(text, /user: Replay a stored task/);
+  assert.match(text, /assistant: Replay answer\./);
+  assert.match(text, /completed Replay stored events/);
   assert.match(text, /Model profile set to frontend_design/);
   assert.match(text, /Model override set to kimi:kimi-design/);
   assert.match(text, /Review mode enabled/);

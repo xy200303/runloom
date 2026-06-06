@@ -8,6 +8,9 @@ import { ApprovalError, ProviderError, RuntimeError, ToolError } from "../errors
 import { RunloomEventBus } from "../events/event-bus.js";
 import { loadMcpServerConfigs } from "../mcp/mcp-config.js";
 import { errorToLogDetails, emitLog } from "../observability/logger.js";
+import { AnthropicMessagesProvider } from "../providers/anthropic-messages-provider.js";
+import { GoogleGeminiProvider } from "../providers/google-gemini-provider.js";
+import { OpenAIChatCompletionsProvider } from "../providers/openai-chat-completions-provider.js";
 import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { redactText, redactValue } from "../security/redaction.js";
 import { FileRuntimeStateStore } from "../sessions/file-runtime-state-store.js";
@@ -89,7 +92,13 @@ import type {
 
 const MAX_MODEL_TOOL_STEPS = 8;
 const PROVIDER_ALIASES: Record<string, string> = {
-  openai: "openai-responses"
+  openai: "openai-responses",
+  "openai-chat": "openai-chat-completions",
+  chat: "openai-chat-completions",
+  anthropic: "anthropic-messages",
+  claude: "anthropic-messages",
+  google: "google-gemini",
+  gemini: "google-gemini"
 };
 
 interface ModelToolCall {
@@ -181,6 +190,27 @@ export class DefaultRunloomAgent implements RunloomAgent {
     if (!options.provider || options.provider === "openai-responses") {
       this.registerProviderSync(
         new OpenAIResponsesProvider({
+          apiKey: options.apiKey,
+          baseUrl: options.baseUrl
+        })
+      );
+    } else if (options.provider === "openai-chat-completions") {
+      this.registerProviderSync(
+        new OpenAIChatCompletionsProvider({
+          apiKey: options.apiKey,
+          baseUrl: options.baseUrl
+        })
+      );
+    } else if (options.provider === "anthropic-messages") {
+      this.registerProviderSync(
+        new AnthropicMessagesProvider({
+          apiKey: options.apiKey,
+          baseUrl: options.baseUrl
+        })
+      );
+    } else if (options.provider === "google-gemini") {
+      this.registerProviderSync(
+        new GoogleGeminiProvider({
           apiKey: options.apiKey,
           baseUrl: options.baseUrl
         })

@@ -19,6 +19,8 @@ import type {
   Unsubscribe
 } from "runloom-agent";
 
+const MAX_VIEW_LINES = 200;
+
 export interface CreateRunloomTuiAppOptions {
   agent: RunloomAgent;
   input?: Readable;
@@ -37,6 +39,19 @@ export function createRunloomTuiApp(options: CreateRunloomTuiAppOptions): Runloo
   return new BasicRunloomTuiApp(options);
 }
 
+interface TuiViewState {
+  transcript: string[];
+  activity: string[];
+  todoItems: RunloomTodoItem[];
+  runStatus: "idle" | string;
+  latestModel?: {
+    providerId?: string;
+    model?: string;
+    source?: string;
+    reason?: string;
+  };
+}
+
 class BasicRunloomTuiApp implements RunloomTuiApp {
   private unsubscribe?: Unsubscribe;
   private stopped = false;
@@ -46,7 +61,13 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private activeLanguage?: string;
   private activeRunId?: string;
   private activeSessionId?: string;
-  private latestTodoItems: RunloomTodoItem[] = [];
+  private assistantBuffer = "";
+  private readonly viewState: TuiViewState = {
+    transcript: [],
+    activity: [],
+    todoItems: [],
+    runStatus: "idle"
+  };
 
   constructor(private readonly options: CreateRunloomTuiAppOptions) {}
 
@@ -123,11 +144,10 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
   render(event: RunloomEvent): void {
     const output = this.options.output ?? defaultOutput;
+    this.applyEventToViewState(event);
 
     switch (event.type) {
       case "run.started":
-        this.activeRunId = event.runId;
-        this.activeSessionId = event.sessionId;
         output.write(`\n[run] started ${event.runId}\n`);
         break;
       case "coding.workspace.inspected":
@@ -137,9 +157,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         output.write(`[git] ${formatGitStatus(event.payload)}\n`);
         break;
       case "todo.updated":
-        if (!this.activeSessionId || event.sessionId === this.activeSessionId) {
-          this.latestTodoItems = (event.payload as { items?: RunloomTodoItem[] }).items ?? [];
-        }
         output.write(`[todo] ${formatTodo(event.payload)}\n`);
         break;
       case "response.output_text.delta":
@@ -173,9 +190,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         output.write(`[run] cancel requested ${event.runId}\n`);
         break;
       case "run.cancelled":
-        if (event.runId === this.activeRunId) {
-          this.activeRunId = undefined;
-        }
         output.write(`[run] cancelled ${event.runId}\n\n`);
         break;
       case "run.resumed":
@@ -208,7 +222,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         [
           "Commands:",
           "  /help          Show this help",
-          "  /status        Show session and approval status",
+          "  /status        Show status panel and approval policy",
+          "  /view          Show status, todo, activity, and transcript panels",
+          "  /transcript    Show recent transcript",
+          "  /activity      Show recent activity",
+          "  /replay        Rebuild panels from stored events",
           "  /permissions   Show approval policy",
           "  /approval      Show or update approval policy",
           "  /approval default <full_access|ask|auto_decide>",
@@ -237,9 +255,50 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
-    if (command === "/status" || command === "/permissions") {
+    if (command === "/status") {
+      const policy = await this.options.agent.getApprovalPolicy();
+      output.write(formatStatusView(this.viewState, {
+        activeSessionId: this.activeSessionId,
+        activeRunId: this.activeRunId,
+        activeModel: this.activeModel,
+        activeProfile: this.activeProfile,
+        activeTaskType: this.activeTaskType,
+        activeLanguage: this.activeLanguage
+      }));
+      output.write(formatApprovalPolicy(policy));
+      return;
+    }
+
+    if (command === "/permissions") {
       const policy = await this.options.agent.getApprovalPolicy();
       output.write(formatApprovalPolicy(policy));
+      return;
+    }
+
+    if (command === "/transcript") {
+      output.write(formatTranscriptView(this.viewState.transcript));
+      return;
+    }
+
+    if (command === "/activity") {
+      output.write(formatActivityView(this.viewState.activity));
+      return;
+    }
+
+    if (command === "/view") {
+      output.write(formatCompositeView(this.viewState, {
+        activeSessionId: this.activeSessionId,
+        activeRunId: this.activeRunId,
+        activeModel: this.activeModel,
+        activeProfile: this.activeProfile,
+        activeTaskType: this.activeTaskType,
+        activeLanguage: this.activeLanguage
+      }));
+      return;
+    }
+
+    if (command === "/replay") {
+      await this.handleReplayCommand();
       return;
     }
 
@@ -266,7 +325,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/todo") {
-      output.write(formatTodoView(this.latestTodoItems));
+      output.write(formatTodoView(this.viewState.todoItems));
       return;
     }
 
@@ -388,7 +447,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       const session = await this.options.agent.getSession(sessionId);
       this.activeSessionId = session.id;
       this.activeRunId = undefined;
-      this.latestTodoItems = [];
+      this.viewState.todoItems = [];
+      this.viewState.runStatus = "idle";
       output.write(`Session switched to ${session.id}\n`);
       return;
     }
@@ -438,6 +498,24 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       const message = error instanceof Error ? error.message : String(error);
       output.write(`Resume failed: ${message}\n`);
     }
+  }
+
+  private async handleReplayCommand(): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const events = await this.options.agent.listEvents({
+      sessionId: this.activeSessionId,
+      limit: MAX_VIEW_LINES
+    });
+    this.rebuildViewState(events);
+    output.write(`[replay] loaded ${events.length} event(s)\n`);
+    output.write(formatCompositeView(this.viewState, {
+      activeSessionId: this.activeSessionId,
+      activeRunId: this.activeRunId,
+      activeModel: this.activeModel,
+      activeProfile: this.activeProfile,
+      activeTaskType: this.activeTaskType,
+      activeLanguage: this.activeLanguage
+    }));
   }
 
   private trackToolSession(result: ToolExecutionResult): void {
@@ -556,6 +634,140 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write(`Unknown /model action: ${action}\n`);
     output.write(formatModelCommandHelp());
   }
+
+  private applyEventToViewState(event: RunloomEvent): void {
+    switch (event.type) {
+      case "run.started": {
+        this.activeRunId = event.runId;
+        this.activeSessionId = event.sessionId;
+        this.viewState.runStatus = "running";
+        this.assistantBuffer = "";
+        const input = (event.payload as { input?: string }).input;
+        if (input) {
+          this.recordTranscript(`user: ${truncateText(input)}`);
+        }
+        this.recordActivity(`run ${event.runId} started`);
+        break;
+      }
+      case "model.selection.resolved": {
+        const selection = event.payload as TuiViewState["latestModel"];
+        this.viewState.latestModel = selection;
+        this.recordActivity(`model ${formatModelSelection(event.payload)}`);
+        break;
+      }
+      case "response.output_text.delta": {
+        this.assistantBuffer += String((event.payload as { delta?: string }).delta ?? "");
+        break;
+      }
+      case "response.completed": {
+        this.flushAssistantTranscript();
+        this.recordActivity("model completed");
+        break;
+      }
+      case "response.failed": {
+        this.flushAssistantTranscript();
+        this.recordActivity(`model failed: ${formatErrorPayload(event.payload)}`);
+        break;
+      }
+      case "run.waiting_approval":
+        this.viewState.runStatus = "waiting_approval";
+        this.recordActivity(`run waiting for approval ${formatWaitingApproval(event.payload)}`.trimEnd());
+        break;
+      case "run.completed":
+        this.viewState.runStatus = "completed";
+        this.recordActivity(`run ${event.runId} completed`);
+        break;
+      case "run.failed":
+        this.viewState.runStatus = "failed";
+        this.activeRunId = undefined;
+        this.recordActivity(`run failed: ${formatErrorPayload(event.payload)}`);
+        break;
+      case "run.cancel_requested":
+        this.recordActivity(`run ${event.runId} cancel requested`);
+        break;
+      case "run.cancelled":
+        this.viewState.runStatus = "cancelled";
+        if (event.runId === this.activeRunId) {
+          this.activeRunId = undefined;
+        }
+        this.recordActivity(`run ${event.runId} cancelled`);
+        break;
+      case "run.resumed":
+        this.activeRunId = event.runId;
+        this.activeSessionId = event.sessionId;
+        this.viewState.runStatus = "running";
+        this.recordActivity(`run ${event.runId} resumed`);
+        break;
+      case "todo.updated":
+        if (!this.activeSessionId || event.sessionId === this.activeSessionId) {
+          this.viewState.todoItems = (event.payload as { items?: RunloomTodoItem[] }).items ?? [];
+        }
+        this.recordActivity(`todo ${formatTodo(event.payload)}`.trimEnd());
+        break;
+      case "coding.workspace.inspected":
+        this.recordActivity("workspace inspected");
+        break;
+      case "coding.git.status":
+        this.recordActivity(`git ${formatGitStatus(event.payload)}`);
+        break;
+      case "approval.requested":
+        this.recordActivity(`approval requested ${formatApprovalRequest(event.payload)}`);
+        break;
+      case "approval.resolved":
+        this.recordActivity(`approval resolved ${formatApprovalResolution(event.payload)}`);
+        break;
+      case "approval.policy.updated":
+        this.recordActivity("approval policy updated");
+        break;
+      case "review.findings.created":
+        this.recordActivity("review findings recorded");
+        break;
+      case "skill.activated":
+        this.recordActivity(`skill activated ${formatSkillActivation(event.payload)}`);
+        break;
+      default:
+        if (event.type.startsWith("tool.")) {
+          this.recordActivity(formatToolActivityEvent(event));
+        } else if (event.type.startsWith("mcp.")) {
+          this.recordActivity(event.type);
+        }
+        break;
+    }
+  }
+
+  private rebuildViewState(events: RunloomEvent[]): void {
+    this.viewState.transcript = [];
+    this.viewState.activity = [];
+    this.viewState.todoItems = [];
+    this.viewState.runStatus = "idle";
+    this.viewState.latestModel = undefined;
+    this.activeRunId = undefined;
+    this.assistantBuffer = "";
+    for (const event of events) {
+      this.applyEventToViewState(event);
+    }
+    this.flushAssistantTranscript();
+  }
+
+  private flushAssistantTranscript(): void {
+    if (!this.assistantBuffer.trim()) {
+      this.assistantBuffer = "";
+      return;
+    }
+    this.recordTranscript(`assistant: ${truncateText(this.assistantBuffer)}`);
+    this.assistantBuffer = "";
+  }
+
+  private recordTranscript(line: string): void {
+    pushCapped(this.viewState.transcript, line);
+  }
+
+  private recordActivity(line: string): void {
+    if (!line.trim()) {
+      return;
+    }
+    pushCapped(this.viewState.activity, line);
+  }
 }
 
 function formatGitStatus(payload: unknown): string {
@@ -583,6 +795,94 @@ function formatTodoView(items: RunloomTodoItem[]): string {
     lines.push(`  ${item.status} ${item.title}${evidence}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatStatusView(
+  state: TuiViewState,
+  context: {
+    activeSessionId?: string;
+    activeRunId?: string;
+    activeModel?: string;
+    activeProfile?: string;
+    activeTaskType?: string;
+    activeLanguage?: string;
+  }
+): string {
+  const latestActivity = state.activity.at(-1) ?? "(none)";
+  return [
+    "Status:",
+    `  session: ${context.activeSessionId ?? "(none)"}`,
+    `  run: ${context.activeRunId ?? "(none)"} status=${state.runStatus}`,
+    `  model: ${formatStatusModel(state, context)}`,
+    `  taskType: ${context.activeTaskType ?? "(auto)"}`,
+    `  language: ${context.activeLanguage ?? "(auto)"}`,
+    `  todo: ${formatTodoCounts(state.todoItems)}`,
+    `  latest activity: ${latestActivity}`
+  ].join("\n") + "\n";
+}
+
+function formatCompositeView(
+  state: TuiViewState,
+  context: {
+    activeSessionId?: string;
+    activeRunId?: string;
+    activeModel?: string;
+    activeProfile?: string;
+    activeTaskType?: string;
+    activeLanguage?: string;
+  }
+): string {
+  return [
+    formatStatusView(state, context).trimEnd(),
+    formatTodoView(state.todoItems).trimEnd(),
+    formatActivityView(state.activity, 8).trimEnd(),
+    formatTranscriptView(state.transcript, 8).trimEnd()
+  ].join("\n") + "\n";
+}
+
+function formatTranscriptView(lines: string[], limit = 20): string {
+  if (lines.length === 0) {
+    return "Transcript: (empty)\n";
+  }
+  return `Transcript:\n${lines.slice(-limit).map((line) => `  ${line}`).join("\n")}\n`;
+}
+
+function formatActivityView(lines: string[], limit = 20): string {
+  if (lines.length === 0) {
+    return "Activity: (none)\n";
+  }
+  return `Activity:\n${lines.slice(-limit).map((line) => `  ${line}`).join("\n")}\n`;
+}
+
+function formatStatusModel(
+  state: TuiViewState,
+  context: {
+    activeModel?: string;
+    activeProfile?: string;
+  }
+): string {
+  if (context.activeModel) {
+    return `${context.activeModel} override`;
+  }
+  if (context.activeProfile) {
+    return `profile:${context.activeProfile}`;
+  }
+  if (state.latestModel?.providerId || state.latestModel?.model) {
+    return `${state.latestModel.providerId ?? "unknown"}:${state.latestModel.model ?? "unknown"}`;
+  }
+  return "(auto)";
+}
+
+function formatTodoCounts(items: RunloomTodoItem[]): string {
+  if (items.length === 0) {
+    return "none";
+  }
+
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([status, count]) => `${status}=${count}`).join(", ");
 }
 
 function formatErrorPayload(payload: unknown): string {
@@ -619,6 +919,27 @@ function formatApprovalResolution(payload: unknown): string {
 function formatWaitingApproval(payload: unknown): string {
   const waiting = payload as { approvalId?: string };
   return waiting.approvalId ? `approval=${waiting.approvalId}` : "";
+}
+
+function formatSkillActivation(payload: unknown): string {
+  const activation = payload as { skillName?: string; reason?: string };
+  const reason = activation.reason ? ` reason=${activation.reason}` : "";
+  return `${activation.skillName ?? "unknown"}${reason}`;
+}
+
+function formatToolActivityEvent(event: RunloomEvent): string {
+  const payload = event.payload as {
+    toolName?: string;
+    name?: string;
+    status?: string;
+    approvalId?: string;
+    error?: string;
+  };
+  const toolName = payload.toolName ?? payload.name;
+  const status = payload.status ? ` status=${payload.status}` : "";
+  const approval = payload.approvalId ? ` approval=${payload.approvalId}` : "";
+  const error = payload.error ? ` error=${payload.error}` : "";
+  return `${event.type}${toolName ? ` ${toolName}` : ""}${status}${approval}${error}`;
 }
 
 function formatModelSelection(payload: unknown): string {
@@ -886,4 +1207,19 @@ function formatApprovalCommandHelp(): string {
 
 function formatScopeList(): string {
   return `Scopes: ${PERMISSION_SCOPES.join(", ")}\n`;
+}
+
+function pushCapped(lines: string[], line: string): void {
+  lines.push(line);
+  if (lines.length > MAX_VIEW_LINES) {
+    lines.splice(0, lines.length - MAX_VIEW_LINES);
+  }
+}
+
+function truncateText(value: string, maxLength = 300): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 3)}...`;
 }

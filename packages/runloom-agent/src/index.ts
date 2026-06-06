@@ -16,7 +16,14 @@ export {
   StoreError,
   ToolError
 } from "./errors.js";
+export { AnthropicMessagesProvider } from "./providers/anthropic-messages-provider.js";
+export { GoogleGeminiProvider } from "./providers/google-gemini-provider.js";
 export { OpenAIResponsesProvider } from "./providers/openai-responses-provider.js";
+export { OpenAIChatCompletionsProvider } from "./providers/openai-chat-completions-provider.js";
+export type { AnthropicMessagesProviderOptions } from "./providers/anthropic-messages-provider.js";
+export type { GoogleGeminiProviderOptions } from "./providers/google-gemini-provider.js";
+export type { OpenAIResponsesProviderOptions } from "./providers/openai-responses-provider.js";
+export type { OpenAIChatCompletionsProviderOptions } from "./providers/openai-chat-completions-provider.js";
 export type {
   ApprovalBridge,
   ApprovalDecision,

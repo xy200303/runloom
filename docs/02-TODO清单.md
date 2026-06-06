@@ -108,14 +108,14 @@
 
 ## Phase 3：模型协议适配
 
-- [ ] OpenAI-compatible Chat Completions adapter。
+- [x] OpenAI-compatible Chat Completions adapter。
 - [x] OpenAI Responses adapter。
-- [ ] Anthropic Claude Messages adapter。
-- [ ] Google Gemini adapter。
+- [x] Anthropic Claude Messages adapter。
+- [x] Google Gemini adapter。
 - [ ] 统一 messages、tools、tool calls、streaming、usage、reasoning、structured output。
-- [ ] provider retry、timeout、rate limit 和 error normalization。
+- [x] provider retry、timeout、rate limit 和 error normalization。
 - [x] 模型选择层不读取 provider secret，只解析 `.runloom` 中的非敏感路由配置。
-- [~] provider compatibility tests：已覆盖 OpenAI Responses contract；仍需 Chat Completions、Claude、Gemini 接入后补齐。
+- [x] provider compatibility tests：已覆盖 OpenAI Responses、Chat Completions、Claude Messages 和 Gemini contract。
 
 验收标准：
 
@@ -127,12 +127,12 @@
 
 - [x] CLI bin：`runloom`。
 - [x] 嵌入式 TUI API：`createRunloomTuiApp`。
-- [ ] transcript 区、输入区、todo 区、tool activity 区、status 区。
-- [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态和 todo；仍需完整 activity panel 与事件回放。
+- [~] transcript 区、输入区、todo 区、tool activity 区、status 区：已建立命令式 view-state panel；仍需完整全屏布局和焦点切换。
+- [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态、todo 和 activity panel；仍需完整 activity panel 交互。
 - [~] approval 弹窗：已实现 `/approvals`、`/approve`、`/deny` 命令式处理；仍需弹窗/快捷键 UI。
 - [~] `/permissions` 权限审批设置面板：已实现命令式读取和修改；仍需面板化展示。
 - [x] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/approvals`、`/approve`、`/deny`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/quit`。
-- [ ] 事件回放和滚动。
+- [~] 事件回放和滚动：已支持 `/replay` 从 stored events 重建面板；仍需键盘滚动。
 
 验收标准：
 

@@ -1,4 +1,8 @@
-export type BuiltInProviderName = "openai-responses";
+export type BuiltInProviderName =
+  | "openai-responses"
+  | "openai-chat-completions"
+  | "anthropic-messages"
+  | "google-gemini";
 
 export type ApprovalMode = "full_access" | "ask" | "auto_decide";
 

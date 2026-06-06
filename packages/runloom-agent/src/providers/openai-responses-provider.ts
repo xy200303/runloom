@@ -10,8 +10,10 @@ import type {
   RunloomModelMessage,
   RunloomModelTool
 } from "../types.js";
+import { fetchProviderJson } from "./provider-http.js";
+import type { ProviderHttpPolicyOptions } from "./provider-http.js";
 
-export interface OpenAIResponsesProviderOptions {
+export interface OpenAIResponsesProviderOptions extends ProviderHttpPolicyOptions {
   apiKey?: string;
   baseUrl?: string;
 }
@@ -30,10 +32,16 @@ export class OpenAIResponsesProvider implements ModelProvider {
 
   private readonly apiKey?: string;
   private readonly baseUrl: string;
+  private readonly httpOptions: ProviderHttpPolicyOptions;
 
   constructor(options: OpenAIResponsesProviderOptions = {}) {
     this.apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
     this.baseUrl = options.baseUrl ?? "https://api.openai.com/v1";
+    this.httpOptions = {
+      timeoutMs: options.timeoutMs,
+      maxRetries: options.maxRetries,
+      retryBaseDelayMs: options.retryBaseDelayMs
+    };
   }
 
   async *createResponse(request: ModelRequest, context: ModelProviderContext): AsyncIterable<ModelProviderEvent> {
@@ -52,26 +60,31 @@ export class OpenAIResponsesProvider implements ModelProvider {
     }
 
     const payload = buildResponsesPayload(request, context);
-    const response = await fetch(`${this.baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json"
+    const result = await fetchProviderJson({
+      url: `${this.baseUrl}/responses`,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
       },
-      body: JSON.stringify(payload),
-      signal: context.signal
+      provider: this.id,
+      signal: context.signal,
+      normalizeError: normalizeResponseError,
+      ...this.httpOptions
     });
 
-    const json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-
-    if (!response.ok) {
+    if (!result.ok) {
       yield {
         type: "response.failed",
-        error: normalizeResponseError(response.status, json, this.id)
+        error: result.error
       };
       return;
     }
 
+    const json = result.json;
     const responseId = typeof json.id === "string" ? json.id : undefined;
     yield { type: "response.created", responseId };
 

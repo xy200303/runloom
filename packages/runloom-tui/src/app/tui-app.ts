@@ -159,6 +159,15 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       case "run.waiting_approval":
         output.write(`[run] waiting for approval ${formatWaitingApproval(event.payload)}\n\n`);
         break;
+      case "run.cancel_requested":
+        output.write(`[run] cancel requested ${event.runId}\n`);
+        break;
+      case "run.cancelled":
+        if (event.runId === this.activeRunId) {
+          this.activeRunId = undefined;
+        }
+        output.write(`[run] cancelled ${event.runId}\n\n`);
+        break;
       case "run.completed":
         output.write("[run] completed\n\n");
         break;
@@ -199,6 +208,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /session       Show or switch sessions",
           "  /todo          Show current todo state",
           "  /diff          Show current git diff",
+          "  /review        Enable code review mode",
+          "  /stop          Stop the active run",
           "  /git           Show git status",
           "  /tests         Run verification command",
           "  /quit          Exit"
@@ -231,6 +242,16 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     if (command === "/diff") {
       await this.handleDiffCommand();
+      return;
+    }
+
+    if (command === "/review" || command === "/review on" || command === "/review off") {
+      this.handleReviewCommand(command);
+      return;
+    }
+
+    if (command === "/stop") {
+      await this.handleStopCommand();
       return;
     }
 
@@ -326,6 +347,30 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     output.write(`Unknown /session action: ${action}\n`);
     output.write(formatSessionCommandHelp());
+  }
+
+  private handleReviewCommand(command: string): void {
+    const output = this.options.output ?? defaultOutput;
+    if (command === "/review off") {
+      if (this.activeTaskType === "code_review") {
+        this.activeTaskType = undefined;
+      }
+      output.write("Review mode disabled\n");
+      return;
+    }
+    this.activeTaskType = "code_review";
+    output.write("Review mode enabled\n");
+  }
+
+  private async handleStopCommand(): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    if (!this.activeRunId) {
+      output.write("No active run to stop\n");
+      return;
+    }
+    const runId = this.activeRunId;
+    await this.options.agent.cancel(runId);
+    output.write(`Stop requested for ${runId}\n`);
   }
 
   private trackToolSession(result: ToolExecutionResult): void {

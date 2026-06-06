@@ -391,6 +391,53 @@ test("agent executes model-requested tools and continues with real workspace out
   await agent.close();
 });
 
+test("agent cancel aborts an active run", async () => {
+  class WaitingProvider {
+    id = "waiting-provider";
+    protocol = "custom";
+    capabilities = {
+      streaming: false,
+      tools: true
+    };
+
+    async *createResponse(_request, context) {
+      yield { type: "response.created", responseId: "resp_waiting" };
+      await waitForAbort(context.signal);
+    }
+  }
+
+  const agent = await createRunloomAgent({
+    provider: new WaitingProvider(),
+    model: "gpt-4.1",
+    workspace: process.cwd()
+  });
+
+  let runId;
+  let resolveStarted;
+  const started = new Promise((resolve) => {
+    resolveStarted = resolve;
+  });
+  const eventTypes = [];
+  agent.subscribe((event) => {
+    eventTypes.push(event.type);
+    if (event.type === "run.started") {
+      runId = event.runId;
+      resolveStarted();
+    }
+  });
+
+  const run = agent.submit("等待直到被取消");
+  await started;
+  await agent.cancel(runId);
+  const result = await run;
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.runId, runId);
+  assert.ok(eventTypes.includes("run.cancel_requested"));
+  assert.ok(eventTypes.includes("run.cancelled"));
+  await agent.close();
+});
+
 test("built-in coding tools operate on real workspace data", async () => {
   const agent = await createRunloomAgent({
     provider: "openai-responses",
@@ -542,4 +589,20 @@ class RecordingProvider {
     yield { type: "response.output_text.delta", delta: `${this.id}:${request.model}` };
     yield { type: "response.completed", finishReason: "stop" };
   }
+}
+
+function waitForAbort(signal) {
+  return new Promise((_, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("aborted"));
+      return;
+    }
+    signal?.addEventListener(
+      "abort",
+      () => {
+        reject(new Error("aborted"));
+      },
+      { once: true }
+    );
+  });
 }

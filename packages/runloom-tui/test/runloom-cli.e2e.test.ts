@@ -17,6 +17,9 @@ describe("runloom CLI e2e", () => {
           "/session list",
           "/todo",
           "/diff",
+          "/review",
+          "/review off",
+          "/stop",
           "/model profile frontend_design",
           "/model",
           "/model clear",
@@ -34,6 +37,9 @@ describe("runloom CLI e2e", () => {
       expect(result.stdout).toContain("Sessions:");
       expect(result.stdout).toContain("Todo: (none)");
       expect(result.stdout).toContain("Diff:");
+      expect(result.stdout).toContain("Review mode enabled");
+      expect(result.stdout).toContain("Review mode disabled");
+      expect(result.stdout).toContain("Stop requested for");
       expect(result.stdout).toContain("Model profile set to frontend_design");
       expect(result.stdout).toContain("profile: frontend_design");
       expect(result.stdout).toContain("Model overrides cleared");

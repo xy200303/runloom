@@ -35,7 +35,7 @@
 - [ ] 实现 session、run、message、event 基础 store。
 - [x] 接入至少一个真实模型协议 adapter，保证最小 runtime 不依赖 mock 数据。
 - [x] 测试代码可提供 test-only provider，覆盖文本输出、tool call 和错误注入。
-- [ ] 实现最小动态 loop：submit、subscribe、cancel、resume。
+- [~] 实现最小动态 loop：已实现 submit、subscribe、active run cancel；仍需 resume 和持久化 run 恢复。
 - [x] 实现 todo store 和 `todo.updated` 事件。
 - [x] 实现基础工具注册和工具执行器。
 - [ ] 实现 approval request/resolution。
@@ -64,7 +64,7 @@
 - [x] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。
 - [ ] 代码修改计划：高风险修改前生成 edit plan，说明目标文件、风险和验证命令。
 - [ ] 用户改动保护：修改前检测目标文件是否已有用户未提交变更，避免覆盖。
-- [ ] Review 模式：支持用户要求 code review 时优先输出 bug、风险和缺失测试。
+- [~] Review 模式：已支持任务推断和 TUI `/review` code_review 路由；仍需专用 review 输出模板与 findings 结构。
 - [ ] 最终交付摘要：输出修改文件、核心变更、验证结果、失败项和剩余风险。
 
 验收标准：
@@ -131,7 +131,7 @@
 - [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态和 todo；仍需完整 activity panel 与事件回放。
 - [ ] approval 弹窗。
 - [ ] `/permissions` 权限审批设置面板。
-- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/git`、`/tests`、`/quit`；仍需 `/review`、`/skills`、`/mcp`、`/stop`、`/resume`。
+- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/quit`；仍需 `/skills`、`/mcp`、`/resume`。
 - [ ] 事件回放和滚动。
 
 验收标准：

@@ -71,6 +71,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly approvalPolicyStore?: FileApprovalPolicyStore;
   private readonly config: RunloomConfig;
   private readonly toolExecutor: ToolExecutor;
+  private readonly activeRuns = new Map<string, { sessionId: string; controller: AbortController }>();
   private approvalPolicy: ApprovalPolicyConfig;
   private sequence = 0;
 
@@ -110,6 +111,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
     const text = request.text;
     const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
     const runId = `run_${randomUUID()}`;
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort();
+    if (options.signal?.aborted) {
+      controller.abort();
+    } else {
+      options.signal?.addEventListener("abort", abortFromParent, { once: true });
+    }
+    this.activeRuns.set(runId, { sessionId: session.id, controller });
 
     this.emit("run.started", "runtime", runId, session.id, {
       input: text,
@@ -143,7 +152,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         session.id,
         text,
         buildWorkspaceContext(inspection),
-        options.signal
+        controller.signal
       );
 
       if (modelResult.status === "waiting_approval") {
@@ -186,6 +195,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
         outputText: modelResult.outputText
       };
     } catch (error) {
+      if (controller.signal.aborted) {
+        this.emit("run.cancelled", "runtime", runId, session.id, {
+          reason: "cancelled"
+        });
+        this.store.touchSession(session.id);
+        return {
+          runId,
+          sessionId: session.id,
+          status: "cancelled",
+          outputText: "Run cancelled."
+        };
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       this.emit("run.failed", "runtime", runId, session.id, {
         error: message
@@ -197,6 +219,9 @@ export class DefaultRunloomAgent implements RunloomAgent {
         status: "failed",
         outputText: message
       };
+    } finally {
+      options.signal?.removeEventListener("abort", abortFromParent);
+      this.activeRuns.delete(runId);
     }
   }
 
@@ -253,7 +278,15 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async cancel(runId: string): Promise<void> {
-    this.emit("run.cancelled", "runtime", runId, "unknown", {});
+    const activeRun = this.activeRuns.get(runId);
+    if (activeRun) {
+      activeRun.controller.abort();
+      this.emit("run.cancel_requested", "runtime", runId, activeRun.sessionId, {});
+      return;
+    }
+    this.emit("run.cancelled", "runtime", runId, "unknown", {
+      reason: "not_active"
+    });
   }
 
   async resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void> {

@@ -15,6 +15,7 @@ test("approval command updates scope and default modes", async () => {
   let closed = false;
   const submissions = [];
   const toolCalls = [];
+  const cancelCalls = [];
   const sessions = [
     {
       id: "ses_tool",
@@ -59,6 +60,9 @@ test("approval command updates scope and default modes", async () => {
         throw new Error(`Session not found: ${sessionId}`);
       }
       return session;
+    },
+    async cancel(runId) {
+      cancelCalls.push(runId);
     },
     async executeTool(name, input) {
       toolCalls.push({ name, input });
@@ -158,10 +162,14 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/todo");
   await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
+  await app.runCommand("/stop");
   await app.runCommand("/model profile frontend_design");
   await app.submitPrompt("设计一个前端界面");
   await app.runCommand("/model set kimi:kimi-design");
   await app.submitPrompt("继续设计界面");
+  await app.runCommand("/review");
+  await app.submitPrompt("审查当前代码");
+  await app.runCommand("/review off");
   await app.runCommand("/model clear");
   await app.runCommand("/quit");
 
@@ -180,17 +188,23 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /packages\/runloom-tui\/src\/app\/tui-app\.ts/);
   assert.match(text, /\[tests\] pnpm typecheck exit=0 duration=12ms/);
   assert.match(text, /tests ok/);
+  assert.match(text, /Stop requested for run_tool/);
   assert.match(text, /Model profile set to frontend_design/);
   assert.match(text, /Model override set to kimi:kimi-design/);
+  assert.match(text, /Review mode enabled/);
+  assert.match(text, /Review mode disabled/);
   assert.equal(submissions[0].input.profile, "frontend_design");
   assert.equal(submissions[0].input.model, undefined);
   assert.equal(submissions[0].options.sessionId, "ses_tool");
   assert.equal(submissions[1].input.model, "kimi:kimi-design");
   assert.equal(submissions[1].input.profile, undefined);
   assert.equal(submissions[1].options.sessionId, "ses_tool");
+  assert.equal(submissions[2].input.taskType, "code_review");
+  assert.equal(submissions[2].options.sessionId, "ses_tool");
   assert.deepEqual(toolCalls[0], { name: "git.status", input: {} });
   assert.deepEqual(toolCalls[1], { name: "git.diff", input: {} });
   assert.deepEqual(toolCalls[2], { name: "shell.verify", input: { command: "pnpm", args: ["typecheck"] } });
+  assert.deepEqual(cancelCalls, ["run_tool"]);
 });
 
 class MemoryOutput extends Writable {

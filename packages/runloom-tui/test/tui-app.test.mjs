@@ -13,12 +13,14 @@ test("approval command updates scope and default modes", async () => {
     updatedBy: "user"
   };
   let closed = false;
+  const submissions = [];
 
   const agent = {
     subscribe() {
       return () => {};
     },
-    async submit() {
+    async submit(input) {
+      submissions.push(input);
       return {
         runId: "run_test",
         sessionId: "ses_test",
@@ -62,6 +64,11 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/approval shell full_access");
   await app.runCommand("/approval default auto_decide");
   await app.runCommand("/tools");
+  await app.runCommand("/model profile frontend_design");
+  await app.submitPrompt("设计一个前端界面");
+  await app.runCommand("/model set kimi:kimi-design");
+  await app.submitPrompt("继续设计界面");
+  await app.runCommand("/model clear");
   await app.runCommand("/quit");
 
   const text = output.toString();
@@ -71,6 +78,12 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Approval mode for shell set to full_access/);
   assert.match(text, /Approval default mode set to auto_decide/);
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
+  assert.match(text, /Model profile set to frontend_design/);
+  assert.match(text, /Model override set to kimi:kimi-design/);
+  assert.equal(submissions[0].profile, "frontend_design");
+  assert.equal(submissions[0].model, undefined);
+  assert.equal(submissions[1].model, "kimi:kimi-design");
+  assert.equal(submissions[1].profile, undefined);
 });
 
 class MemoryOutput extends Writable {

@@ -22,6 +22,7 @@ export interface RunloomTuiApp {
   start(): Promise<void>;
   stop(): Promise<void>;
   runCommand(command: string): Promise<void>;
+  submitPrompt(prompt: string): Promise<void>;
   render(event: RunloomEvent): void;
 }
 
@@ -32,6 +33,10 @@ export function createRunloomTuiApp(options: CreateRunloomTuiAppOptions): Runloo
 class BasicRunloomTuiApp implements RunloomTuiApp {
   private unsubscribe?: Unsubscribe;
   private stopped = false;
+  private activeModel?: string;
+  private activeProfile?: string;
+  private activeTaskType?: string;
+  private activeLanguage?: string;
 
   constructor(private readonly options: CreateRunloomTuiAppOptions) {}
 
@@ -64,7 +69,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         await this.runCommand(line);
         continue;
       }
-      await this.options.agent.submit(line);
+      await this.submitPrompt(line);
     }
 
     rl.close();
@@ -75,6 +80,16 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     this.stopped = true;
     this.unsubscribe?.();
     await this.options.agent.close();
+  }
+
+  async submitPrompt(prompt: string): Promise<void> {
+    await this.options.agent.submit({
+      text: prompt,
+      model: this.activeModel,
+      profile: this.activeProfile,
+      taskType: this.activeTaskType,
+      language: this.activeLanguage
+    });
   }
 
   render(event: RunloomEvent): void {
@@ -101,6 +116,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         break;
       case "response.failed":
         output.write(`\n[model] failed: ${formatErrorPayload(event.payload)}\n`);
+        break;
+      case "model.selection.resolved":
+        output.write(`[model] ${formatModelSelection(event.payload)}\n`);
         break;
       case "approval.policy.updated":
         output.write(`[approval] policy updated\n${formatApprovalPolicy(event.payload as ApprovalPolicyConfig)}\n`);
@@ -143,6 +161,10 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /approval      Show or update approval policy",
           "  /approval default <full_access|ask|auto_decide>",
           "  /approval <scope> <full_access|ask|auto_decide>",
+          "  /model        Show or set model overrides",
+          "  /model set <provider:model|model>",
+          "  /model profile <name>",
+          "  /model clear",
           "  /tools         List registered coding tools",
           "  /quit          Exit"
         ].join("\n") + "\n"
@@ -159,6 +181,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (command === "/tools") {
       const tools = await this.options.agent.listTools();
       output.write(formatTools(tools));
+      return;
+    }
+
+    if (command.startsWith("/model")) {
+      this.handleModelCommand(command);
       return;
     }
 
@@ -208,6 +235,62 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     });
     output.write(`Approval mode for ${scope} set to ${mode}\n`);
   }
+
+  private handleModelCommand(command: string): void {
+    const output = this.options.output ?? defaultOutput;
+    const [, action, ...rest] = command.split(/\s+/);
+    const value = rest.join(" ").trim();
+
+    if (!action) {
+      output.write(formatActiveModelState(this.activeModel, this.activeProfile, this.activeTaskType, this.activeLanguage));
+      output.write(formatModelCommandHelp());
+      return;
+    }
+
+    if (action === "clear") {
+      this.activeModel = undefined;
+      this.activeProfile = undefined;
+      this.activeTaskType = undefined;
+      this.activeLanguage = undefined;
+      output.write("Model overrides cleared\n");
+      return;
+    }
+
+    if (!value) {
+      output.write(`Missing value for /model ${action}\n`);
+      output.write(formatModelCommandHelp());
+      return;
+    }
+
+    if (action === "set") {
+      this.activeModel = value;
+      this.activeProfile = undefined;
+      output.write(`Model override set to ${value}\n`);
+      return;
+    }
+
+    if (action === "profile") {
+      this.activeProfile = value;
+      this.activeModel = undefined;
+      output.write(`Model profile set to ${value}\n`);
+      return;
+    }
+
+    if (action === "task") {
+      this.activeTaskType = value;
+      output.write(`Model task type set to ${value}\n`);
+      return;
+    }
+
+    if (action === "language") {
+      this.activeLanguage = value;
+      output.write(`Model language set to ${value}\n`);
+      return;
+    }
+
+    output.write(`Unknown /model action: ${action}\n`);
+    output.write(formatModelCommandHelp());
+  }
 }
 
 function formatGitStatus(payload: unknown): string {
@@ -252,6 +335,14 @@ function formatWaitingApproval(payload: unknown): string {
   return waiting.approvalId ? `approval=${waiting.approvalId}` : "";
 }
 
+function formatModelSelection(payload: unknown): string {
+  const selection = payload as { providerId?: string; model?: string; reason?: string; source?: string };
+  const model = `${selection.providerId ?? "unknown"}:${selection.model ?? "unknown"}`;
+  const source = selection.source ? ` source=${selection.source}` : "";
+  const reason = selection.reason ? ` reason=${selection.reason}` : "";
+  return `${model}${source}${reason}`;
+}
+
 function formatApprovalPolicy(policy: ApprovalPolicyConfig): string {
   const lines = [`Approval policy: default=${policy.defaultMode}`];
   for (const [scope, mode] of Object.entries(policy.scopes)) {
@@ -270,6 +361,28 @@ function formatTools(tools: ToolSummary[]): string {
     lines.push(`  ${tool.name} - ${tool.description} [${permissions}]`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatActiveModelState(model?: string, profile?: string, taskType?: string, language?: string): string {
+  return [
+    "Model overrides:",
+    `  model: ${model ?? "(auto)"}`,
+    `  profile: ${profile ?? "(auto)"}`,
+    `  taskType: ${taskType ?? "(auto)"}`,
+    `  language: ${language ?? "(auto)"}`
+  ].join("\n") + "\n";
+}
+
+function formatModelCommandHelp(): string {
+  return [
+    "Usage:",
+    "  /model",
+    "  /model set <provider:model|model>",
+    "  /model profile <name>",
+    "  /model task <taskType>",
+    "  /model language <language>",
+    "  /model clear"
+  ].join("\n") + "\n";
 }
 
 function parseApprovalMode(value: string | undefined): ApprovalMode | undefined {

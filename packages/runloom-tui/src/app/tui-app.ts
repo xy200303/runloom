@@ -3,6 +3,7 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
 import { APPROVAL_MODES, PERMISSION_SCOPES } from "runloom-agent";
 import type {
+  ApprovalDecision,
   ApprovalMode,
   ApprovalPolicyConfig,
   ApprovalRequest,
@@ -257,8 +258,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /approval default <full_access|ask|auto_decide>",
           "  /approval <scope> <full_access|ask|auto_decide>",
           "  /approvals     List pending approvals",
-          "  /approve <id>  Approve a pending approval",
-          "  /deny <id>     Deny a pending approval",
+          "  /approve <id> [once|session|workspace|global] [mode=<mode>]",
+          "  /deny <id> [reason]",
           "  /model        Show or set model overrides",
           "  /model set <provider:model|model>",
           "  /model profile <name>",
@@ -808,15 +809,21 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
   private async handleApprovalDecisionCommand(command: string): Promise<void> {
     const output = this.options.output ?? defaultOutput;
-    const [action, approvalId] = command.split(/\s+/);
+    const [action, approvalId, ...rest] = command.split(/\s+/);
     if (!approvalId) {
       output.write(`Missing approval id for ${action}\n`);
       return;
     }
-    const decision = action === "/approve" ? "approved" : "denied";
+    const parsedDecision = parseApprovalDecisionCommand(action, rest);
+    if ("error" in parsedDecision) {
+      output.write(`${parsedDecision.error}\n`);
+      output.write(formatApprovalDecisionCommandHelp());
+      return;
+    }
+
     try {
-      await this.options.agent.resolveApproval(approvalId, { decision });
-      output.write(`Approval ${approvalId} ${decision}\n`);
+      await this.options.agent.resolveApproval(approvalId, parsedDecision.decision);
+      output.write(`Approval ${approvalId} ${formatApprovalDecision(parsedDecision.decision)}\n`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       output.write(`Approval decision failed: ${message}\n`);
@@ -1229,7 +1236,9 @@ function formatApprovals(approvals: ApprovalRequest[]): string {
     lines.push(`  ${approval.id} risk=${approval.risk} scope=${approval.scope} mode=${approval.mode}${expires}`);
     lines.push(`    action=${approval.action} run=${approval.runId} session=${approval.sessionId}`);
     lines.push(`    summary: ${approval.summary}`);
-    lines.push(`    commands: /approve ${approval.id} | /deny ${approval.id} | /approvals view ${approval.id}`);
+    lines.push(
+      `    commands: /approve ${approval.id} once | /approve ${approval.id} session | /deny ${approval.id} <reason> | /approvals view ${approval.id}`
+    );
   }
   return `${lines.join("\n")}\n`;
 }
@@ -1250,7 +1259,7 @@ function formatApprovalDetail(approval: ApprovalRequest): string {
   }
   lines.push("  details:");
   lines.push(indentBlock(formatUnknownValue(approval.details), 4));
-  lines.push(`  commands: /approve ${approval.id} | /deny ${approval.id}`);
+  lines.push(`  commands: /approve ${approval.id} once | /approve ${approval.id} session | /deny ${approval.id} <reason>`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -1490,8 +1499,16 @@ function formatApprovalsCommandHelp(): string {
     "Usage:",
     "  /approvals",
     "  /approvals view <approval-id>",
-    "  /approve <approval-id>",
-    "  /deny <approval-id>"
+    "  /approve <approval-id> [once|session|workspace|global] [mode=<full_access|ask|auto_decide>]",
+    "  /deny <approval-id> [reason]"
+  ].join("\n") + "\n";
+}
+
+function formatApprovalDecisionCommandHelp(): string {
+  return [
+    "Usage:",
+    "  /approve <approval-id> [once|session|workspace|global] [mode=<full_access|ask|auto_decide>]",
+    "  /deny <approval-id> [reason]"
   ].join("\n") + "\n";
 }
 
@@ -1516,6 +1533,76 @@ function parseScrollAmount(value: string | undefined): number {
     return parsed;
   }
   return DEFAULT_PANEL_LINES;
+}
+
+function parseApprovalDecisionCommand(
+  action: string,
+  args: string[]
+): { decision: ApprovalDecision } | { error: string } {
+  if (action === "/deny") {
+    return {
+      decision: {
+        decision: "denied",
+        reason: args.join(" ").trim() || undefined
+      }
+    };
+  }
+
+  const decision: ApprovalDecision = {
+    decision: "approved"
+  };
+
+  for (const arg of args) {
+    if (arg === "once" || arg === "never") {
+      decision.remember = "never";
+      continue;
+    }
+    if (arg === "session" || arg === "workspace" || arg === "global") {
+      decision.remember = arg;
+      continue;
+    }
+    if (arg.startsWith("mode=")) {
+      const mode = parseApprovalMode(arg.slice("mode=".length));
+      if (!mode) {
+        return {
+          error: `Invalid approval mode: ${arg.slice("mode=".length) || "(missing)"}`
+        };
+      }
+      decision.setModeForScope = mode;
+      continue;
+    }
+    if (arg.startsWith("set=")) {
+      const mode = parseApprovalMode(arg.slice("set=".length));
+      if (!mode) {
+        return {
+          error: `Invalid approval mode: ${arg.slice("set=".length) || "(missing)"}`
+        };
+      }
+      decision.setModeForScope = mode;
+      continue;
+    }
+    return {
+      error: `Unknown approval option: ${arg}`
+    };
+  }
+
+  return {
+    decision
+  };
+}
+
+function formatApprovalDecision(decision: ApprovalDecision): string {
+  const parts: string[] = [decision.decision];
+  if (decision.remember) {
+    parts.push(`remember=${decision.remember}`);
+  }
+  if (decision.setModeForScope) {
+    parts.push(`setModeForScope=${decision.setModeForScope}`);
+  }
+  if (decision.reason) {
+    parts.push(`reason=${decision.reason}`);
+  }
+  return parts.join(" ");
 }
 
 function formatFocusCommandHelp(): string {

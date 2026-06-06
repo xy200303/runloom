@@ -32,6 +32,19 @@ test("approval command updates scope and default modes", async () => {
         command: "pnpm test",
         cwd: process.cwd()
       }
+    },
+    {
+      id: "approval_deny",
+      runId: "run_tool",
+      sessionId: "ses_tool",
+      scope: "filesystem.write",
+      action: "tool:fs.write",
+      risk: "critical",
+      mode: "ask",
+      summary: "Runloom wants to write a file.",
+      details: {
+        path: "src/generated.ts"
+      }
     }
   ];
   const sessions = [
@@ -311,7 +324,8 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/permissions set filesystem.write ask");
   await app.runCommand("/approvals");
   await app.runCommand("/approvals view approval_test");
-  await app.runCommand("/approve approval_test");
+  await app.runCommand("/approve approval_test session mode=full_access");
+  await app.runCommand("/deny approval_deny unsafe file write");
   await app.runCommand("/approvals");
   await app.runCommand("/tools");
   await app.runCommand("/skills");
@@ -475,13 +489,14 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Approval Policy:\n {2}default: auto_decide/);
   assert.match(text, /filesystem\.write\s+auto_decide\s+default/);
   assert.match(text, /Approval mode for filesystem\.write set to ask/);
-  assert.match(text, /Approval Center: 1 pending/);
+  assert.match(text, /Approval Center: 2 pending/);
   assert.match(text, /approval_test risk=high scope=shell mode=ask/);
   assert.match(text, /action=tool:shell\.verify run=run_tool session=ses_tool/);
-  assert.match(text, /commands: \/approve approval_test \| \/deny approval_test \| \/approvals view approval_test/);
+  assert.match(text, /commands: \/approve approval_test once \| \/approve approval_test session \| \/deny approval_test <reason> \| \/approvals view approval_test/);
   assert.match(text, /Approval: approval_test/);
   assert.match(text, /"command": "pnpm test"/);
-  assert.match(text, /Approval approval_test approved/);
+  assert.match(text, /Approval approval_test approved remember=session setModeForScope=full_access/);
+  assert.match(text, /Approval approval_deny denied reason=unsafe file write/);
   assert.match(text, /Approvals: \(none pending\)/);
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
   assert.match(text, /typescript-code-review@0\.1\.0 enabled source=registered tools=fs\.read/);
@@ -535,7 +550,23 @@ test("approval command updates scope and default modes", async () => {
   assert.deepEqual(toolCalls[2], { name: "shell.verify", input: { command: "pnpm", args: ["typecheck"] } });
   assert.deepEqual(cancelCalls, ["run_tool"]);
   assert.deepEqual(resumeCalls, ["run_tool"]);
-  assert.deepEqual(approvalDecisions, [{ approvalId: "approval_test", decision: { decision: "approved" } }]);
+  assert.deepEqual(approvalDecisions, [
+    {
+      approvalId: "approval_test",
+      decision: {
+        decision: "approved",
+        remember: "session",
+        setModeForScope: "full_access"
+      }
+    },
+    {
+      approvalId: "approval_deny",
+      decision: {
+        decision: "denied",
+        reason: "unsafe file write"
+      }
+    }
+  ]);
 });
 
 class MemoryOutput extends Writable {

@@ -170,6 +170,13 @@ await agent.updateApprovalPolicy({
 
 审批策略变更必须产生事件和审计记录。更改默认权限模式、放宽某个 scope 或把 `ask` 改成 `full_access` 属于安全敏感变更。
 
+## Security Behavior
+
+- 内置文件工具和 `shell.verify` 的 `cwd` 都必须通过 workspace path guard，不能通过 `..`、绝对路径或 symlink 访问 workspace 外部路径。
+- `full_access` 只是在 guardrails 内自动放行，不会绕过 workspace guard、redaction、trace 或 audit。
+- 工具输出、approval details、事件 payload、模型可见的工具结果和模型输出都会做初版 redaction，覆盖 secret-like key/value、Bearer token、常见 provider key 形态和本地 workspace 绝对路径。
+- redaction 后的文本不可恢复原文；如果宿主 UI 需要展示敏感内容，必须走后续专门的 approval/secret adapter，而不是从事件流或工具结果中读取。
+
 ## Host Adapter API
 
 为了支持横向扩展和未来 VSCode 插件，`runloom-agent` 需要提供宿主环境抽象。TUI、后期 Vue Web、VSCode 插件、local daemon 和 CI bot 都通过这些接口接入。

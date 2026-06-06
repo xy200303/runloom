@@ -6,6 +6,7 @@ import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-sum
 import { loadRunloomConfig, selectModel } from "../config/runloom-config.js";
 import { RunloomEventBus } from "../events/event-bus.js";
 import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
+import { redactText, redactValue } from "../security/redaction.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
 import { createBuiltInCodingTools } from "../tools/coding-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
@@ -484,6 +485,9 @@ export class DefaultRunloomAgent implements RunloomAgent {
     signal?: AbortSignal
   ): Promise<ModelLoopResult> {
     const output: string[] = [];
+    const redactedUserMessage = `${redactText(workspaceContext, {
+      workspace: this.workspace
+    })}\n\nUser task:\n${redactText(userText, { workspace: this.workspace })}`;
     const input: RunloomModelInputItem[] = [
       {
         type: "message",
@@ -502,7 +506,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         content: [
           {
             type: "text",
-            text: `${workspaceContext}\n\nUser task:\n${userText}`
+            text: redactedUserMessage
           }
         ]
       }
@@ -534,7 +538,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       for await (const event of events) {
         this.forwardProviderEvent(event, runId, sessionId);
         if (event.type === "response.output_text.delta") {
-          output.push(event.delta);
+          output.push(redactText(event.delta, { workspace: this.workspace }));
         }
         if (event.type === "response.tool_call.completed") {
           toolCalls.push({
@@ -682,16 +686,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
       sequence: ++this.sequence,
       timestamp: new Date().toISOString(),
       source,
-      payload
+      payload: redactValue(payload, { workspace: this.workspace })
     });
   }
 
   private recordAudit(input: Omit<RunloomAuditRecord, "id" | "timestamp">): void {
-    const record: RunloomAuditRecord = {
-      id: `audit_${randomUUID()}`,
-      timestamp: new Date().toISOString(),
-      ...input
-    };
+    const record = redactValue<RunloomAuditRecord>(
+      {
+        id: `audit_${randomUUID()}`,
+        timestamp: new Date().toISOString(),
+        ...input
+      },
+      { workspace: this.workspace }
+    );
     this.store.appendAuditRecord(record);
     this.emit("audit.recorded", "audit", input.runId ?? "audit", input.sessionId ?? "global", record);
   }

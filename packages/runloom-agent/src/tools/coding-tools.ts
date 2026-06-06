@@ -4,7 +4,10 @@ import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { GitStatusSummary, RunloomDiffSummary, ToolDefinition, VerificationResult } from "../types.js";
-import { resolveWorkspacePath } from "./path-guard.js";
+import {
+  resolveExistingWorkspacePath,
+  resolveWritableWorkspacePath
+} from "../security/path-guard.js";
 
 const execFileAsync = promisify(execFile);
 const SKIPPED_DIRS = new Set([".git", "node_modules", "dist", ".tsbuildinfo"]);
@@ -37,7 +40,7 @@ function createListFilesTool(): ToolDefinition<{ path?: string; recursive?: bool
     },
     permissions: ["filesystem.read"],
     async execute(input, context) {
-      const root = resolveWorkspacePath(context.workspace, input.path);
+      const root = await resolveExistingWorkspacePath(context.workspace, input.path);
       const maxEntries = input.maxEntries ?? 200;
       const files: string[] = [];
 
@@ -70,7 +73,7 @@ function createReadFileTool(): ToolDefinition<{ path: string; maxBytes?: number 
     },
     permissions: ["filesystem.read"],
     async execute(input, context) {
-      const target = resolveWorkspacePath(context.workspace, input.path);
+      const target = await resolveExistingWorkspacePath(context.workspace, input.path);
       const maxBytes = input.maxBytes ?? 120_000;
       const content = await readFile(target, "utf8");
       return {
@@ -102,7 +105,7 @@ function createSearchFilesTool(): ToolDefinition<
     },
     permissions: ["filesystem.read"],
     async execute(input, context) {
-      const root = resolveWorkspacePath(context.workspace, input.path);
+      const root = await resolveExistingWorkspacePath(context.workspace, input.path);
       const candidates: string[] = [];
       const maxResults = input.maxResults ?? 100;
       const maxFileBytes = input.maxFileBytes ?? 200_000;
@@ -113,7 +116,7 @@ function createSearchFilesTool(): ToolDefinition<
         if (matches.length >= maxResults) {
           break;
         }
-        const abs = resolveWorkspacePath(context.workspace, file);
+        const abs = await resolveExistingWorkspacePath(context.workspace, file);
         const fileStat = await stat(abs).catch(() => undefined);
         if (!fileStat?.isFile() || fileStat.size > maxFileBytes) {
           continue;
@@ -152,7 +155,7 @@ function createWriteFileTool(): ToolDefinition<{ path: string; content: string }
     },
     permissions: ["filesystem.write"],
     async execute(input, context) {
-      const target = resolveWorkspacePath(context.workspace, input.path);
+      const target = await resolveWritableWorkspacePath(context.workspace, input.path);
       await writeFile(target, input.content, "utf8");
       return {
         path: relative(context.workspace, target),
@@ -206,7 +209,7 @@ function createVerifyCommandTool(): ToolDefinition<
     permissions: ["shell"],
     async execute(input, context) {
       const started = Date.now();
-      const cwd = resolveWorkspacePath(context.workspace, input.cwd);
+      const cwd = await resolveExistingWorkspacePath(context.workspace, input.cwd);
       try {
         const result = await execFileAsync(input.command, input.args ?? [], {
           cwd,

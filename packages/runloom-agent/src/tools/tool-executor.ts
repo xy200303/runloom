@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getApprovalMode } from "../approvals/policy.js";
+import { redactValue } from "../security/redaction.js";
 import type {
   ApprovalPolicyConfig,
   ApprovalRequest,
@@ -33,14 +34,15 @@ export class ToolExecutor {
       sessionId,
       signal: context.signal
     };
+    const safeInput = redactValue(input, { workspace: fullContext.workspace });
 
     this.options.emit("tool.call.requested", "tool", runId, sessionId, {
       toolName: tool.name,
-      inputSummary: summarize(input),
+      inputSummary: summarize(safeInput),
       permissions: tool.permissions
     });
 
-    const approval = this.checkApproval(tool, input, runId, sessionId);
+    const approval = this.checkApproval(tool, safeInput, runId, sessionId);
     if (approval) {
       this.options.saveApproval(approval);
       this.options.emit("approval.requested", "approval", runId, sessionId, approval);
@@ -60,10 +62,11 @@ export class ToolExecutor {
 
     try {
       const output = (await tool.execute(input, fullContext)) as TOutput;
+      const safeOutput = redactValue(output, { workspace: fullContext.workspace });
       const durationMs = Date.now() - started;
       this.options.emit("tool.call.completed", "tool", runId, sessionId, {
         toolName: tool.name,
-        outputSummary: summarize(output),
+        outputSummary: summarize(safeOutput),
         durationMs
       });
       return {
@@ -71,12 +74,14 @@ export class ToolExecutor {
         runId,
         sessionId,
         status: "completed",
-        output,
+        output: safeOutput,
         durationMs
       };
     } catch (error) {
       const durationMs = Date.now() - started;
-      const message = error instanceof Error ? error.message : String(error);
+      const message = redactValue(error instanceof Error ? error.message : String(error), {
+        workspace: fullContext.workspace
+      });
       this.options.emit("tool.call.failed", "tool", runId, sessionId, {
         toolName: tool.name,
         error: message,

@@ -10,7 +10,9 @@
   ],
   "scripts": {
     "build": "tsc -b packages/runloom-agent packages/runloom-tui",
+    "changeset": "changeset",
     "lint": "eslint .",
+    "release": "pnpm build && changeset publish",
     "typecheck": "tsc -b packages/runloom-agent packages/runloom-tui --pretty false",
     "test": "pnpm test:unit && pnpm build && node --test packages/runloom-agent/test/runtime.test.mjs packages/runloom-tui/test/tui-app.test.mjs",
     "test:vitest": "pnpm build && vitest run --config vitest.config.ts",
@@ -19,9 +21,11 @@
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "test:security": "vitest run --config vitest.security.config.ts",
     "test:e2e": "pnpm build && vitest run --config vitest.e2e.config.ts",
+    "version-packages": "changeset version",
     "pack:dry": "npm pack --dry-run --workspace runloom-agent && npm pack --dry-run --workspace runloom-tui"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.15.3",
     "eslint": "^10.4.1",

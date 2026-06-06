@@ -100,6 +100,7 @@ TUI 不解析供应商原始 streaming event。
 - `/session switch <id>`：切换 session。
 - `/todo`：显示 todo。
 - `/activity [filter]`：显示 activity，可按 `runs`、`models`、`todos`、`coding`、`tools`、`approvals`、`reviews`、`skills`、`mcp` 过滤。
+- `/activity view [filter] [index|latest]`：查看 activity 详情，包括事件类型、run/session、source、timestamp 和 payload。
 - `/tools`：显示可用工具。
 - `/diff`：显示当前 run 产生的 diff 摘要。
 - `/git`：显示当前 workspace git 状态。
@@ -233,7 +234,7 @@ Todo panel 展示：
 - approval 状态。
 
 支持展开查看详细输出，但默认要 redaction 后展示。
-首期命令式界面通过 `/activity tools` 查看工具活动过滤视图。
+首期命令式界面通过 `/activity tools` 查看工具活动过滤视图，通过 `/activity tools view latest` 展开最近一条工具活动详情。
 
 ## Coding Activity
 
@@ -246,7 +247,7 @@ TUI 需要把编程开发活动作为一等状态展示：
 - Git 状态：当前分支、dirty files、用户未提交改动风险。
 - Review：发现的问题、严重程度、文件位置和建议验证方式。
 
-首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp`，所有过滤视图仍只消费 `RunloomEvent` 派生出的 TUI view state。
+首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp` 和 `/activity view ...`，所有过滤与详情视图仍只消费 `RunloomEvent` 派生出的 TUI view state。
 
 原则：
 

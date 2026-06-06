@@ -480,6 +480,9 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/activity reviews");
   await app.runCommand("/activity tools");
   await app.runCommand("/activity mcp");
+  await app.runCommand("/activity view models 1");
+  await app.runCommand("/activity tools view latest");
+  await app.runCommand("/activity view mcp latest");
   await app.runCommand("/view");
   for (let index = 0; index < 25; index += 1) {
     app.render({
@@ -583,6 +586,11 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Activity \(reviews\):\n {2}review findings recorded/);
   assert.match(text, /Activity \(tools\):\n {2}tool\.completed fs\.read status=completed/);
   assert.match(text, /Activity \(mcp\):\n {2}mcp\.server\.connected/);
+  assert.match(text, /Activity Detail \(models\): #2\n {2}category: models\n {2}filteredIndex: 1\n {2}event: model\.selection\.resolved/);
+  assert.match(text, /"providerId": "openai-responses"/);
+  assert.match(text, /Activity Detail \(tools\): #6\n {2}category: tools\n {2}filteredIndex: 1\n {2}event: tool\.completed/);
+  assert.match(text, /"toolName": "fs\.read"/);
+  assert.match(text, /Activity Detail \(mcp\): #7\n {2}category: mcp\n {2}filteredIndex: 1\n {2}event: mcp\.server\.connected/);
   assert.match(text, /Focus set to transcript/);
   assert.match(text, /Transcript: showing 1-20 of 27 offset=7/);
   assert.match(text, /assistant: Scroll response 0\./);

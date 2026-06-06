@@ -78,6 +78,12 @@ interface TuiViewState {
 interface TuiActivityRecord {
   category: ActivityCategory;
   line: string;
+  eventType?: string;
+  runId?: string;
+  sessionId?: string;
+  source?: string;
+  timestamp?: string;
+  payload?: unknown;
 }
 
 class BasicRunloomTuiApp implements RunloomTuiApp {
@@ -599,6 +605,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     let amountText = second;
 
     const firstToken = first?.toLowerCase();
+    if (firstToken === "view") {
+      output.write(this.formatActivityDetailCommand(second, third));
+      return;
+    }
+
     if (firstToken && isScrollAction(firstToken)) {
       actionText = firstToken;
     } else if (firstToken) {
@@ -615,6 +626,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         actionText = second?.toLowerCase();
         amountText = third;
       }
+    }
+
+    if (actionText === "view") {
+      output.write(this.formatActivityDetailCommand(category, amountText));
+      return;
     }
 
     if (actionText && isScrollAction(actionText)) {
@@ -832,12 +848,43 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   }
 
   private activityLines(category?: ActivityCategory): string[] {
+    return this.activityRecords(category).map((record) => record.line);
+  }
+
+  private activityRecords(category?: ActivityCategory): TuiActivityRecord[] {
     if (!category) {
-      return this.viewState.activity;
+      return this.viewState.activityRecords;
     }
-    return this.viewState.activityRecords
-      .filter((record) => record.category === category)
-      .map((record) => record.line);
+    return this.viewState.activityRecords.filter((record) => record.category === category);
+  }
+
+  private formatActivityDetailCommand(categoryOrTarget?: ActivityCategory | string, targetText?: string): string {
+    let category: ActivityCategory | undefined;
+    let target = targetText;
+
+    if (typeof categoryOrTarget === "string") {
+      const token = categoryOrTarget.toLowerCase();
+      if (token === "all") {
+        target = targetText;
+      } else {
+        const parsedCategory = parseActivityCategory(token);
+        if (parsedCategory) {
+          category = parsedCategory;
+          target = targetText;
+        } else {
+          target = categoryOrTarget;
+        }
+      }
+    } else {
+      category = categoryOrTarget;
+    }
+
+    return formatActivityDetail(
+      this.activityRecords(category),
+      this.viewState.activityRecords,
+      category,
+      target
+    );
   }
 
   private viewContext(): TuiViewContext {
@@ -1136,13 +1183,13 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         if (input) {
           this.recordTranscript(`user: ${truncateText(input)}`);
         }
-        this.recordActivity(`run ${event.runId} started`, "runs");
+        this.recordActivity(`run ${event.runId} started`, "runs", event);
         break;
       }
       case "model.selection.resolved": {
         const selection = event.payload as TuiViewState["latestModel"];
         this.viewState.latestModel = selection;
-        this.recordActivity(`model ${formatModelSelection(event.payload)}`, "models");
+        this.recordActivity(`model ${formatModelSelection(event.payload)}`, "models", event);
         break;
       }
       case "response.output_text.delta": {
@@ -1151,75 +1198,75 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       }
       case "response.completed": {
         this.flushAssistantTranscript();
-        this.recordActivity("model completed", "models");
+        this.recordActivity("model completed", "models", event);
         break;
       }
       case "response.failed": {
         this.flushAssistantTranscript();
-        this.recordActivity(`model failed: ${formatErrorPayload(event.payload)}`, "models");
+        this.recordActivity(`model failed: ${formatErrorPayload(event.payload)}`, "models", event);
         break;
       }
       case "run.waiting_approval":
         this.viewState.runStatus = "waiting_approval";
-        this.recordActivity(`run waiting for approval ${formatWaitingApproval(event.payload)}`.trimEnd(), "approvals");
+        this.recordActivity(`run waiting for approval ${formatWaitingApproval(event.payload)}`.trimEnd(), "approvals", event);
         break;
       case "run.completed":
         this.viewState.runStatus = "completed";
-        this.recordActivity(`run ${event.runId} completed`, "runs");
+        this.recordActivity(`run ${event.runId} completed`, "runs", event);
         break;
       case "run.failed":
         this.viewState.runStatus = "failed";
         this.activeRunId = undefined;
-        this.recordActivity(`run failed: ${formatErrorPayload(event.payload)}`, "runs");
+        this.recordActivity(`run failed: ${formatErrorPayload(event.payload)}`, "runs", event);
         break;
       case "run.cancel_requested":
-        this.recordActivity(`run ${event.runId} cancel requested`, "runs");
+        this.recordActivity(`run ${event.runId} cancel requested`, "runs", event);
         break;
       case "run.cancelled":
         this.viewState.runStatus = "cancelled";
         if (event.runId === this.activeRunId) {
           this.activeRunId = undefined;
         }
-        this.recordActivity(`run ${event.runId} cancelled`, "runs");
+        this.recordActivity(`run ${event.runId} cancelled`, "runs", event);
         break;
       case "run.resumed":
         this.activeRunId = event.runId;
         this.activeSessionId = event.sessionId;
         this.viewState.runStatus = "running";
-        this.recordActivity(`run ${event.runId} resumed`, "runs");
+        this.recordActivity(`run ${event.runId} resumed`, "runs", event);
         break;
       case "todo.updated":
         if (!this.activeSessionId || event.sessionId === this.activeSessionId) {
           this.viewState.todoItems = (event.payload as { items?: RunloomTodoItem[] }).items ?? [];
         }
-        this.recordActivity(`todo ${formatTodo(event.payload)}`.trimEnd(), "todos");
+        this.recordActivity(`todo ${formatTodo(event.payload)}`.trimEnd(), "todos", event);
         break;
       case "coding.workspace.inspected":
-        this.recordActivity("workspace inspected", "coding");
+        this.recordActivity("workspace inspected", "coding", event);
         break;
       case "coding.git.status":
-        this.recordActivity(`git ${formatGitStatus(event.payload)}`, "coding");
+        this.recordActivity(`git ${formatGitStatus(event.payload)}`, "coding", event);
         break;
       case "approval.requested":
-        this.recordActivity(`approval requested ${formatApprovalRequest(event.payload)}`, "approvals");
+        this.recordActivity(`approval requested ${formatApprovalRequest(event.payload)}`, "approvals", event);
         break;
       case "approval.resolved":
-        this.recordActivity(`approval resolved ${formatApprovalResolution(event.payload)}`, "approvals");
+        this.recordActivity(`approval resolved ${formatApprovalResolution(event.payload)}`, "approvals", event);
         break;
       case "approval.policy.updated":
-        this.recordActivity("approval policy updated", "approvals");
+        this.recordActivity("approval policy updated", "approvals", event);
         break;
       case "review.findings.created":
-        this.recordActivity("review findings recorded", "reviews");
+        this.recordActivity("review findings recorded", "reviews", event);
         break;
       case "skill.activated":
-        this.recordActivity(`skill activated ${formatSkillActivation(event.payload)}`, "skills");
+        this.recordActivity(`skill activated ${formatSkillActivation(event.payload)}`, "skills", event);
         break;
       default:
         if (event.type.startsWith("tool.")) {
-          this.recordActivity(formatToolActivityEvent(event), "tools");
+          this.recordActivity(formatToolActivityEvent(event), "tools", event);
         } else if (event.type.startsWith("mcp.")) {
-          this.recordActivity(event.type, "mcp");
+          this.recordActivity(event.type, "mcp", event);
         }
         break;
     }
@@ -1262,12 +1309,21 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     pushCapped(this.viewState.transcript, line);
   }
 
-  private recordActivity(line: string, category: ActivityCategory): void {
+  private recordActivity(line: string, category: ActivityCategory, event?: RunloomEvent): void {
     if (!line.trim()) {
       return;
     }
     pushCapped(this.viewState.activity, line);
-    pushCapped(this.viewState.activityRecords, { category, line });
+    pushCapped(this.viewState.activityRecords, {
+      category,
+      line,
+      eventType: event?.type,
+      runId: event?.runId,
+      sessionId: event?.sessionId,
+      source: event?.source,
+      timestamp: event?.timestamp,
+      payload: event?.payload
+    });
   }
 }
 
@@ -1347,6 +1403,60 @@ function formatActivityView(
   return `${formatPanelHeader(title, lines.length, visibleLines.start, visibleLines.items.length, scrollOffset)}\n${visibleLines.items
     .map((line) => `  ${line}`)
     .join("\n")}\n`;
+}
+
+function formatActivityDetail(
+  records: TuiActivityRecord[],
+  allRecords: TuiActivityRecord[],
+  category?: ActivityCategory,
+  targetText?: string
+): string {
+  const title = category ? `Activity Detail (${category})` : "Activity Detail";
+  if (records.length === 0) {
+    return `${title}: (none)\n`;
+  }
+
+  const resolved = resolveActivityDetailTarget(records, targetText);
+  if ("error" in resolved) {
+    return `${resolved.error}\n${formatActivityCommandHelp()}`;
+  }
+
+  const absoluteIndex = allRecords.indexOf(resolved.record) + 1;
+  const lines = [
+    `${title}: #${absoluteIndex}`,
+    `  category: ${resolved.record.category}`,
+    `  filteredIndex: ${resolved.index + 1}`,
+    `  event: ${resolved.record.eventType ?? "(none)"}`,
+    `  run: ${resolved.record.runId ?? "(none)"}`,
+    `  session: ${resolved.record.sessionId ?? "(none)"}`,
+    `  source: ${resolved.record.source ?? "(none)"}`,
+    `  timestamp: ${resolved.record.timestamp ?? "(none)"}`,
+    `  line: ${resolved.record.line}`,
+    "  payload:",
+    indentBlock(formatUnknownValue(resolved.record.payload), 4)
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function resolveActivityDetailTarget(
+  records: TuiActivityRecord[],
+  targetText?: string
+): { record: TuiActivityRecord; index: number } | { error: string } {
+  const target = targetText?.toLowerCase() ?? "latest";
+  if (target === "latest" || target === "last" || target === "current" || target === ".") {
+    const index = records.length - 1;
+    return { record: records[index], index };
+  }
+
+  const parsed = Number(target);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > records.length) {
+    return {
+      error: `Invalid activity selection: ${targetText ?? "(missing)"}`
+    };
+  }
+
+  const index = parsed - 1;
+  return { record: records[index], index };
 }
 
 function formatStatusModel(state: TuiViewState, context: Pick<TuiViewContext, "activeModel" | "activeProfile">): string {
@@ -1878,7 +1988,12 @@ function formatScrollCommandHelp(): string {
 }
 
 function formatActivityCommandHelp(): string {
-  return "Usage: /activity [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [up|down|top|bottom] [lines]\n";
+  return [
+    "Usage:",
+    "  /activity [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [up|down|top|bottom] [lines]",
+    "  /activity view [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [index|latest]",
+    "  /activity <filter> view [index|latest]"
+  ].join("\n") + "\n";
 }
 
 function formatShortcutCommandHelp(): string {

@@ -37,6 +37,10 @@
 - [ ] 实现 approval request/resolution。
 - [ ] 实现 approval policy：完全访问、请求批准、替我决定三种模式。
 - [ ] 支持按 permission scope 修改审批模式，并写入 audit trail。
+- [ ] 实现 `~/.runloom/config.json` 全局配置读取，支持默认模型、provider 偏好和非敏感用户偏好。
+- [ ] 支持 workspace `.runloom/config.json` 覆盖全局配置，但禁止在仓库配置中保存 secret。
+- [ ] 实现任务画像模型路由：前端设计、Go 开发、原型设计、代码审查和测试修复可以命中不同模型。
+- [ ] 产生 `model.selection.resolved` 事件，记录 provider、model、命中规则和选择原因。
 - [ ] 实现 workspace path guard 和 redaction 初版。
 - [ ] 实现错误类型和结构化日志接口。
 - [ ] 实现 coding task 基础上下文：workspace 摘要、package 信息、git 状态和用户未提交变更提示。
@@ -106,6 +110,7 @@
 - [ ] Google Gemini adapter。
 - [ ] 统一 messages、tools、tool calls、streaming、usage、reasoning、structured output。
 - [ ] provider retry、timeout、rate limit 和 error normalization。
+- [ ] 模型选择层不读取 provider secret，只解析 `.runloom` 中的非敏感路由配置。
 - [ ] provider compatibility tests。
 
 验收标准：
@@ -258,4 +263,6 @@
 - 用户首期可以选择 TUI 或自定义 Node.js 应用接入，后期可以选择 Vue Web 接入。
 - 已发布 npm 包 public API 清晰稳定，README 和 examples 足以独立使用；`runloom-web` 后期发布时遵守同等标准。
 - 模型、工具、Skills、MCP、A2A、外部 agent 都受统一事件、权限、审批和审计约束。
+- 用户可以在 `~/.runloom` 中配置默认模型，并为前端设计、Go 开发、原型设计等任务配置不同模型。
+- 单元测试覆盖 config/model routing/provider/tool/security/event/store；集成测试覆盖真实 workspace、TUI 命令、状态目录、provider fixture 和 pack dry run。
 - 自我成长不是静默修改，而是可解释、可验证、可批准、可回滚的工程过程。

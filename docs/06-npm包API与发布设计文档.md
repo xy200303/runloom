@@ -50,6 +50,7 @@ export interface RunloomAgent {
   getRun(runId: string): Promise<RunloomRun>;
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
+  listEditPlans(options?: ListEditPlansOptions): Promise<RunloomEditPlan[]>;
   listDiffRecords(options?: ListDiffRecordsOptions): Promise<RunloomDiffRecord[]>;
   listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;
   resume(runId: string): Promise<RunResult>;
@@ -74,6 +75,9 @@ export interface RunloomAgent {
 - `RunloomMessage`
 - `RunloomMessageRole`
 - `ListMessagesOptions`
+- `RunloomEditPlan`
+- `RunloomEditPlanStatus`
+- `ListEditPlansOptions`
 - `RunloomDiffRecord`
 - `ListDiffRecordsOptions`
 - `RunloomAuditRecord`
@@ -192,6 +196,8 @@ await agent.updateApprovalPolicy({
 
 - 内置文件工具和 `shell.verify` 的 `cwd` 都必须通过 workspace path guard，不能通过 `..`、绝对路径或 symlink 访问 workspace 外部路径。
 - 内置文件工具包括 `fs.list`、`fs.read`、`fs.search`、`fs.write` 和 `fs.patch`；写入和 patch 使用 `filesystem.write` approval scope。
+- 高风险代码修改前，模型或宿主应先调用 `edit.plan` 记录修改目标、目标文件、风险和验证命令；该工具不修改文件，不需要额外权限。
+- `edit.plan` 会写入 `RunloomEditPlan`，宿主可以通过 `listEditPlans()` 回放，并监听 `edit.plan.created` 事件构建计划面板或审计视图。
 - `fs.write` 和 `fs.patch` 默认拒绝修改 Git 中已有未提交变更的目标文件，避免覆盖用户改动。
 - `fs.patch` 使用精确文本替换，`fs.write` 和 `fs.patch` 都支持 `expectedSha256` 校验；当调用方确认当前文件 hash 后，才可以继续修改 dirty 文件。
 - `diff.text`、`git.diff`、`fs.patch` 等输出 `RunloomDiffSummary` 的工具会写入 `RunloomDiffRecord`，宿主可以通过 `listDiffRecords()` 回放，也可以通过 `DiffAdapter.showDiff()` 即时展示。

@@ -62,7 +62,7 @@
 - [x] Diff 工具：已实现 `diff.text`、`git.diff`、持久化 diff record 与宿主 diff adapter 展示。
 - [x] Shell 验证工具：运行用户或项目配置的 typecheck/test/build 命令。
 - [x] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。
-- [ ] 代码修改计划：高风险修改前生成 edit plan，说明目标文件、风险和验证命令。
+- [x] 代码修改计划：高风险修改前生成 edit plan，说明目标文件、风险和验证命令。
 - [x] 用户改动保护：修改前检测目标文件是否已有用户未提交变更，避免覆盖。
 - [~] Review 模式：已支持任务推断和 TUI `/review` code_review 路由；仍需专用 review 输出模板与 findings 结构。
 - [ ] 最终交付摘要：输出修改文件、核心变更、验证结果、失败项和剩余风险。

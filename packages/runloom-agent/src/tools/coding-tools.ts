@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
-import type { GitStatusSummary, RunloomDiffSummary, ToolDefinition, VerificationResult } from "../types.js";
+import type { CodeEditPlan, GitStatusSummary, RunloomDiffSummary, RunloomEditPlan, ToolDefinition, VerificationResult } from "../types.js";
 import {
   resolveExistingWorkspacePath,
   resolveWritableWorkspacePath
@@ -17,6 +17,7 @@ export function createBuiltInCodingTools(): ToolDefinition[] {
     createListFilesTool(),
     createReadFileTool(),
     createSearchFilesTool(),
+    createEditPlanTool(),
     createWriteFileTool(),
     createPatchFileTool(),
     createDiffTextTool(),
@@ -137,6 +138,43 @@ function createSearchFilesTool(): ToolDefinition<
         }
       }
       return { matches };
+    }
+  };
+}
+
+function createEditPlanTool(): ToolDefinition<CodeEditPlan, RunloomEditPlan> {
+  return {
+    name: "edit.plan",
+    description: "Record a code edit plan before high-risk code modifications.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string" },
+        targetFiles: { type: "array", items: { type: "string" } },
+        risks: { type: "array", items: { type: "string" } },
+        verificationCommands: { type: "array", items: { type: "string" } },
+        reason: { type: "string" }
+      },
+      required: ["goal", "targetFiles", "risks", "verificationCommands"],
+      additionalProperties: false
+    },
+    permissions: [],
+    async execute(input, context) {
+      // Tool inputs can come directly from a model, so normalize before creating durable trace data.
+      const now = new Date().toISOString();
+      return {
+        id: `editplan_${randomUUID()}`,
+        runId: context.runId,
+        sessionId: context.sessionId,
+        status: "proposed",
+        goal: requireNonEmptyString(input.goal, "goal"),
+        targetFiles: requireNonEmptyStringArray(input.targetFiles, "targetFiles"),
+        risks: requireNonEmptyStringArray(input.risks, "risks"),
+        verificationCommands: requireNonEmptyStringArray(input.verificationCommands, "verificationCommands"),
+        reason: input.reason === undefined ? undefined : requireNonEmptyString(input.reason, "reason"),
+        createdAt: now,
+        updatedAt: now
+      };
     }
   };
 }
@@ -495,6 +533,25 @@ function parseGitNumstatValue(value: string | undefined): number {
   }
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function requireNonEmptyString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`edit.plan requires a non-empty ${fieldName}.`);
+  }
+  return value.trim();
+}
+
+function requireNonEmptyStringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`edit.plan requires ${fieldName} to be a string array.`);
+  }
+
+  const normalized = value.map((item) => requireNonEmptyString(item, fieldName));
+  if (normalized.length === 0) {
+    throw new Error(`edit.plan requires at least one ${fieldName} entry.`);
+  }
+  return normalized;
 }
 
 async function assertFileCanBeModified(

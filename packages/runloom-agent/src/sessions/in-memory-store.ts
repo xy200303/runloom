@@ -4,6 +4,7 @@ import type {
   ApprovalRequest,
   RunloomAuditRecord,
   RunloomDiffRecord,
+  RunloomEditPlan,
   RunloomMessage,
   RunloomSession
 } from "../types.js";
@@ -14,6 +15,7 @@ export class InMemorySessionStore {
   private readonly approvalDecisions = new Map<string, ApprovalDecision>();
   private readonly auditRecords: RunloomAuditRecord[] = [];
   private readonly messages: RunloomMessage[] = [];
+  private readonly editPlans: RunloomEditPlan[] = [];
   private readonly diffRecords: RunloomDiffRecord[] = [];
 
   createSession(workspace: string): RunloomSession {
@@ -79,6 +81,22 @@ export class InMemorySessionStore {
         return false;
       }
       return !options.runId || message.runId === options.runId;
+    });
+  }
+
+  appendEditPlan(plan: RunloomEditPlan): void {
+    this.editPlans.push(plan);
+  }
+
+  listEditPlans(options: { sessionId?: string; runId?: string; status?: RunloomEditPlan["status"] } = {}): RunloomEditPlan[] {
+    return this.editPlans.filter((plan) => {
+      if (options.sessionId && plan.sessionId !== options.sessionId) {
+        return false;
+      }
+      if (options.runId && plan.runId !== options.runId) {
+        return false;
+      }
+      return !options.status || plan.status === options.status;
     });
   }
 

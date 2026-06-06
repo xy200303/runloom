@@ -21,6 +21,7 @@ import type {
   ExecuteToolOptions,
   ListAuditRecordsOptions,
   ListDiffRecordsOptions,
+  ListEditPlansOptions,
   ListEventsOptions,
   ListMessagesOptions,
   ListRunsOptions,
@@ -38,6 +39,7 @@ import type {
   RunloomAuditRecord,
   RunloomDiffRecord,
   RunloomDiffSummary,
+  RunloomEditPlan,
   RunloomInput,
   RunloomMessage,
   RunloomRun,
@@ -378,6 +380,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       signal: options.signal
     });
     await this.recordDiffResult(name, result);
+    this.recordEditPlanResult(name, result);
     this.appendMessage({
       runId,
       sessionId: session.id,
@@ -490,6 +493,15 @@ export class DefaultRunloomAgent implements RunloomAgent {
       runId: options.runId
     });
     return takeLast(messages, options.limit).map(cloneMessage);
+  }
+
+  async listEditPlans(options: ListEditPlansOptions = {}): Promise<RunloomEditPlan[]> {
+    const plans = this.store.listEditPlans({
+      sessionId: options.sessionId,
+      runId: options.runId,
+      status: options.status
+    });
+    return takeLast(plans, options.limit).map(cloneEditPlan);
   }
 
   async listDiffRecords(options: ListDiffRecordsOptions = {}): Promise<RunloomDiffRecord[]> {
@@ -649,7 +661,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
           {
             type: "text",
             text:
-              "You are Runloom, a professional local coding agent. Be concise, cite local evidence, protect user changes, and summarize verification."
+              "You are Runloom, a professional local coding agent. Be concise, cite local evidence, protect user changes, and summarize verification. Before high-risk code modifications, call edit.plan with target files, risks, and verification commands."
           }
         ]
       },
@@ -809,6 +821,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       signal
     });
     await this.recordDiffResult(toolCall.name, result);
+    this.recordEditPlanResult(toolCall.name, result);
     return result;
   }
 
@@ -938,6 +951,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
     this.emit("diff.recorded", "diff", result.runId, result.sessionId, safeRecord);
   }
 
+  private recordEditPlanResult(toolName: string, result: ToolExecutionResult): void {
+    if (toolName !== "edit.plan" || result.status !== "completed" || !isRunloomEditPlan(result.output)) {
+      return;
+    }
+
+    const plan = redactValue(cloneEditPlan(result.output), { workspace: this.workspace });
+    this.store.appendEditPlan(plan);
+    this.emit("edit.plan.created", "coding", result.runId, result.sessionId, plan);
+  }
+
   private recordAudit(input: Omit<RunloomAuditRecord, "id" | "timestamp">): void {
     const record = redactValue<RunloomAuditRecord>(
       {
@@ -988,6 +1011,15 @@ function cloneDiffRecord(record: RunloomDiffRecord): RunloomDiffRecord {
   };
 }
 
+function cloneEditPlan(plan: RunloomEditPlan): RunloomEditPlan {
+  return {
+    ...plan,
+    targetFiles: [...plan.targetFiles],
+    risks: [...plan.risks],
+    verificationCommands: [...plan.verificationCommands]
+  };
+}
+
 function cloneDiffSummary(diff: RunloomDiffSummary): RunloomDiffSummary {
   return {
     filesChanged: [...diff.filesChanged],
@@ -1004,6 +1036,29 @@ function isRunloomDiffSummary(value: unknown): value is RunloomDiffSummary {
     Array.isArray((value as { filesChanged?: unknown }).filesChanged) &&
     (value as { filesChanged: unknown[] }).filesChanged.every((item) => typeof item === "string")
   );
+}
+
+function isRunloomEditPlan(value: unknown): value is RunloomEditPlan {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const plan = value as Partial<RunloomEditPlan>;
+  return (
+    typeof plan.id === "string" &&
+    typeof plan.runId === "string" &&
+    typeof plan.sessionId === "string" &&
+    plan.status === "proposed" &&
+    typeof plan.goal === "string" &&
+    isStringArray(plan.targetFiles) &&
+    isStringArray(plan.risks) &&
+    isStringArray(plan.verificationCommands) &&
+    typeof plan.createdAt === "string" &&
+    typeof plan.updatedAt === "string"
+  );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function takeLast<TItem>(items: TItem[], limit?: number): TItem[] {

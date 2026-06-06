@@ -447,6 +447,25 @@ export interface CodeEditPlan {
   targetFiles: string[];
   risks: string[];
   verificationCommands: string[];
+  reason?: string;
+}
+
+export type RunloomEditPlanStatus = "proposed" | "accepted" | "completed" | "cancelled";
+
+export interface RunloomEditPlan extends CodeEditPlan {
+  id: string;
+  runId: string;
+  sessionId: string;
+  status: RunloomEditPlanStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListEditPlansOptions {
+  sessionId?: string;
+  runId?: string;
+  status?: RunloomEditPlanStatus;
+  limit?: number;
 }
 
 export interface RunloomDiffSummary {
@@ -546,6 +565,7 @@ export interface RunloomAgent {
   getRun(runId: string): Promise<RunloomRun>;
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
+  listEditPlans(options?: ListEditPlansOptions): Promise<RunloomEditPlan[]>;
   listDiffRecords(options?: ListDiffRecordsOptions): Promise<RunloomDiffRecord[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;

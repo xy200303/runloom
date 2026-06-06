@@ -729,6 +729,7 @@ test("built-in tools can be listed for host adapters", async () => {
   const patchTool = tools.find((tool) => tool.name === "fs.patch");
   const shellTool = tools.find((tool) => tool.name === "shell.verify");
   const diffTool = tools.find((tool) => tool.name === "git.diff");
+  const editPlanTool = tools.find((tool) => tool.name === "edit.plan");
 
   assert.ok(readTool);
   assert.equal(readTool.permissions[0], "filesystem.read");
@@ -738,6 +739,8 @@ test("built-in tools can be listed for host adapters", async () => {
   assert.equal(shellTool.permissions[0], "shell");
   assert.ok(diffTool);
   assert.equal(diffTool.permissions[0], "filesystem.read");
+  assert.ok(editPlanTool);
+  assert.deepEqual(editPlanTool.permissions, []);
   await agent.close();
 });
 

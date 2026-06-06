@@ -26,6 +26,7 @@ const COMPOSITE_PANEL_LINES = 8;
 
 type TuiPanel = "status" | "transcript" | "todo" | "activity";
 type ScrollAction = "up" | "down" | "top" | "bottom";
+type TuiShortcut = "ctrl+l" | "pgup" | "pgdn" | "alt+1" | "alt+2" | "alt+3";
 
 interface TuiViewContext {
   activeSessionId?: string;
@@ -252,6 +253,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /focus <panel> Focus status, transcript, todo, or activity",
           "  /scroll <dir>  Scroll focused panel up, down, top, or bottom",
           "  /clear        Clear the current view without deleting the session",
+          "  /key <key>    Dispatch a keyboard shortcut",
           "  /replay        Rebuild panels from stored events",
           "  /permissions   Show or update approval policy panel",
           "  /permissions set <scope|default> <mode>",
@@ -336,6 +338,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (command === "/clear") {
       this.clearViewState({ preserveActiveRun: true, preserveLatestModel: true });
       output.write("View cleared\n");
+      return;
+    }
+
+    if (command === "/key" || command.startsWith("/key ")) {
+      this.handleShortcutCommand(command);
       return;
     }
 
@@ -606,6 +613,43 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     this.scrollPanel(this.viewState.focus, action, parseScrollAmount(amountText));
     output.write(this.formatPanel(this.viewState.focus));
+  }
+
+  private handleShortcutCommand(command: string): void {
+    const output = this.options.output ?? defaultOutput;
+    const [, ...parts] = command.split(/\s+/);
+    const shortcut = normalizeShortcut(parts.join(""));
+
+    if (!shortcut) {
+      output.write("Invalid keyboard shortcut\n");
+      output.write(formatShortcutCommandHelp());
+      return;
+    }
+
+    if (shortcut === "ctrl+l") {
+      this.clearViewState({ preserveActiveRun: true, preserveLatestModel: true });
+      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+      output.write("View cleared\n");
+      return;
+    }
+
+    if (shortcut === "pgup" || shortcut === "pgdn") {
+      this.scrollPanel("transcript", shortcut === "pgup" ? "up" : "down", DEFAULT_PANEL_LINES);
+      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+      output.write(formatTranscriptView(this.viewState.transcript, DEFAULT_PANEL_LINES, this.viewState.transcriptScrollOffset));
+      return;
+    }
+
+    const panel = panelForShortcut(shortcut);
+    if (!panel) {
+      output.write("Invalid keyboard shortcut\n");
+      output.write(formatShortcutCommandHelp());
+      return;
+    }
+    this.viewState.focus = panel;
+    output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+    output.write(`Focus set to ${panel}\n`);
+    output.write(this.formatPanel(panel));
   }
 
   private scrollPanel(panel: TuiPanel, action: ScrollAction, amount: number): void {
@@ -1637,6 +1681,63 @@ function formatFocusCommandHelp(): string {
 
 function formatScrollCommandHelp(): string {
   return "Usage: /scroll <up|down|top|bottom> [lines]\n";
+}
+
+function formatShortcutCommandHelp(): string {
+  return "Usage: /key <ctrl+l|pgup|pgdn|alt+1|alt+2|alt+3>\n";
+}
+
+function normalizeShortcut(value: string): TuiShortcut | undefined {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, "");
+  if (normalized === "ctrl+l" || normalized === "control+l") {
+    return "ctrl+l";
+  }
+  if (normalized === "pgup" || normalized === "pageup") {
+    return "pgup";
+  }
+  if (normalized === "pgdn" || normalized === "pagedown") {
+    return "pgdn";
+  }
+  if (normalized === "alt+1" || normalized === "option+1") {
+    return "alt+1";
+  }
+  if (normalized === "alt+2" || normalized === "option+2") {
+    return "alt+2";
+  }
+  if (normalized === "alt+3" || normalized === "option+3") {
+    return "alt+3";
+  }
+  return undefined;
+}
+
+function formatShortcutLabel(shortcut: TuiShortcut): string {
+  switch (shortcut) {
+    case "ctrl+l":
+      return "Ctrl+L";
+    case "pgup":
+      return "PgUp";
+    case "pgdn":
+      return "PgDn";
+    case "alt+1":
+      return "Alt+1";
+    case "alt+2":
+      return "Alt+2";
+    case "alt+3":
+      return "Alt+3";
+  }
+}
+
+function panelForShortcut(shortcut: TuiShortcut): TuiPanel | undefined {
+  switch (shortcut) {
+    case "alt+1":
+      return "transcript";
+    case "alt+2":
+      return "todo";
+    case "alt+3":
+      return "activity";
+    default:
+      return undefined;
+  }
 }
 
 function visibleSlice<TItem>(

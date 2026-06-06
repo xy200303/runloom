@@ -465,6 +465,11 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/scroll bottom");
   await app.runCommand("/focus activity");
   await app.runCommand("/scroll top");
+  await app.runCommand("/key alt+1");
+  await app.runCommand("/key pgup");
+  await app.runCommand("/key pgdn");
+  await app.runCommand("/key alt+2");
+  await app.runCommand("/key alt+3");
   await app.runCommand("/todo");
   await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
@@ -482,6 +487,7 @@ test("approval command updates scope and default modes", async () => {
   await app.submitPrompt("审查当前代码");
   await app.runCommand("/review off");
   await app.runCommand("/model clear");
+  await app.runCommand("/key ctrl+l");
   await app.runCommand("/quit");
 
   const text = output.toString();
@@ -523,6 +529,11 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /assistant: Scroll response 24\./);
   assert.match(text, /Focus set to activity/);
   assert.match(text, /Activity: showing 1-20 of 30 offset=10/);
+  assert.match(text, /Shortcut Alt\+1\nFocus set to transcript/);
+  assert.match(text, /Shortcut PgUp\nTranscript: showing 1-20 of 27 offset=7/);
+  assert.match(text, /Shortcut PgDn\nTranscript: showing 8-27 of 27/);
+  assert.match(text, /Shortcut Alt\+2\nFocus set to todo/);
+  assert.match(text, /Shortcut Alt\+3\nFocus set to activity/);
   assert.match(text, /Todo:\n {2}in_progress Check TUI commands/);
   assert.match(text, /\[review\] 1 finding\(s\)/);
   assert.match(text, /Files: packages\/runloom-tui\/src\/app\/tui-app\.ts/);
@@ -544,6 +555,7 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Model override set to kimi:kimi-design/);
   assert.match(text, /Review mode enabled/);
   assert.match(text, /Review mode disabled/);
+  assert.match(text, /Shortcut Ctrl\+L\nView cleared/);
   assert.equal(submissions[0].input.profile, "frontend_design");
   assert.equal(submissions[0].input.model, undefined);
   assert.equal(submissions[0].options.sessionId, "ses_tool");

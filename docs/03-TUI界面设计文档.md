@@ -117,6 +117,7 @@ TUI 不解析供应商原始 streaming event。
 - `/stop`：取消当前 run。
 - `/resume`：恢复可恢复 run。
 - `/clear`：清空当前视图，不删除 session。
+- `/key <shortcut>`：分发 line-mode 快捷键入口，支持 `ctrl+l`、`pgup`、`pgdn`、`alt+1`、`alt+2`、`alt+3`。
 - `/quit`：退出。
 
 命令处理只调用 agent API，不直接操作内部 store。
@@ -132,6 +133,8 @@ TUI 不解析供应商原始 streaming event。
 - `Alt+1`：聚焦 transcript。
 - `Alt+2`：聚焦 todo。
 - `Alt+3`：聚焦 activity。
+
+首期 readline 模式下，`Ctrl+L`、`PgUp/PgDn`、`Alt+1/2/3` 通过 `/key <shortcut>` 复用同一套快捷键分发逻辑；后续全屏 raw-mode 接入真实按键时不改变面板状态语义。
 
 ## Approval 交互
 

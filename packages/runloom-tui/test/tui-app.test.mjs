@@ -17,6 +17,20 @@ test("approval command updates scope and default modes", async () => {
   const toolCalls = [];
   const cancelCalls = [];
   const resumeCalls = [];
+  const approvalDecisions = [];
+  let pendingApprovals = [
+    {
+      id: "approval_test",
+      runId: "run_tool",
+      sessionId: "ses_tool",
+      scope: "shell",
+      action: "tool:shell.verify",
+      risk: "high",
+      mode: "ask",
+      summary: "Runloom wants to execute shell.verify.",
+      details: {}
+    }
+  ];
   const sessions = [
     {
       id: "ses_tool",
@@ -51,6 +65,13 @@ test("approval command updates scope and default modes", async () => {
           permissions: ["filesystem.read"]
         }
       ];
+    },
+    async listApprovals() {
+      return pendingApprovals;
+    },
+    async resolveApproval(approvalId, decision) {
+      approvalDecisions.push({ approvalId, decision });
+      pendingApprovals = pendingApprovals.filter((approval) => approval.id !== approvalId);
     },
     async listSkills() {
       return [
@@ -171,6 +192,9 @@ test("approval command updates scope and default modes", async () => {
 
   await app.runCommand("/approval shell full_access");
   await app.runCommand("/approval default auto_decide");
+  await app.runCommand("/approvals");
+  await app.runCommand("/approve approval_test");
+  await app.runCommand("/approvals");
   await app.runCommand("/tools");
   await app.runCommand("/skills");
   await app.runCommand("/mcp");
@@ -217,6 +241,9 @@ test("approval command updates scope and default modes", async () => {
   assert.equal(closed, true);
   assert.match(text, /Approval mode for shell set to full_access/);
   assert.match(text, /Approval default mode set to auto_decide/);
+  assert.match(text, /approval_test run=run_tool scope=shell risk=high mode=ask/);
+  assert.match(text, /Approval approval_test approved/);
+  assert.match(text, /Approvals: \(none pending\)/);
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
   assert.match(text, /typescript-code-review@0\.1\.0 enabled source=registered tools=fs\.read/);
   assert.match(text, /workspace enabled transport=stdio status=connected tools=fs\.read resources=1 prompts=0/);
@@ -247,6 +274,7 @@ test("approval command updates scope and default modes", async () => {
   assert.deepEqual(toolCalls[2], { name: "shell.verify", input: { command: "pnpm", args: ["typecheck"] } });
   assert.deepEqual(cancelCalls, ["run_tool"]);
   assert.deepEqual(resumeCalls, ["run_tool"]);
+  assert.deepEqual(approvalDecisions, [{ approvalId: "approval_test", decision: { decision: "approved" } }]);
 });
 
 class MemoryOutput extends Writable {

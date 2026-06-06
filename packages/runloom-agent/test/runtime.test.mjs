@@ -599,6 +599,12 @@ test("shell verification is governed by approval policy", async () => {
   const waiting = await defaultAgent.executeTool("shell.verify", { command: "node", args: ["--version"] });
   assert.equal(waiting.status, "waiting_approval");
   assert.ok(waiting.approvalId);
+  const pendingApprovals = await defaultAgent.listApprovals();
+  assert.equal(pendingApprovals.length, 1);
+  assert.equal(pendingApprovals[0].id, waiting.approvalId);
+  assert.equal(pendingApprovals[0].sessionId, waiting.sessionId);
+  await defaultAgent.resolveApproval(waiting.approvalId, { decision: "approved" });
+  assert.deepEqual(await defaultAgent.listApprovals(), []);
   await defaultAgent.close();
 
   const fullAccessAgent = await createRunloomAgent({

@@ -42,6 +42,10 @@ export class InMemorySessionStore {
     return this.approvals.get(approvalId);
   }
 
+  listApprovals(): ApprovalRequest[] {
+    return [...this.approvals.values()];
+  }
+
   resolveApproval(approvalId: string, decision: ApprovalDecision): void {
     this.approvalDecisions.set(approvalId, decision);
     this.approvals.delete(approvalId);

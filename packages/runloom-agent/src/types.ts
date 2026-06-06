@@ -35,6 +35,7 @@ export interface ApprovalPolicyPatch {
 export interface ApprovalRequest {
   id: string;
   runId: string;
+  sessionId: string;
   scope: PermissionScope;
   action: string;
   risk: "low" | "medium" | "high" | "critical";
@@ -427,6 +428,7 @@ export interface RunloomAgent {
   registerSkill(skill: RunloomSkillSummary): Promise<void>;
   listMcpServers(): Promise<McpServerSummary[]>;
   registerMcpServer(server: McpServerSummary): Promise<void>;
+  listApprovals(): Promise<ApprovalRequest[]>;
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe;
   listSessions(options?: ListSessionsOptions): Promise<RunloomSession[]>;
   getSession(sessionId: string): Promise<RunloomSession>;

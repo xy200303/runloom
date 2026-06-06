@@ -13,6 +13,7 @@ import type {
   ApprovalDecision,
   ApprovalPolicyConfig,
   ApprovalPolicyPatch,
+  ApprovalRequest,
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
   McpServerSummary,
@@ -336,6 +337,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
     });
   }
 
+  async listApprovals(): Promise<ApprovalRequest[]> {
+    return this.store.listApprovals().map((approval) => ({
+      ...approval
+    }));
+  }
+
   async getSession(sessionId: string): Promise<RunloomSession> {
     const session = this.store.getSession(sessionId);
     if (!session) {
@@ -384,13 +391,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void> {
     const approval = this.store.getApproval(approvalId);
-    this.store.resolveApproval(approvalId, decision);
-    if (approval?.runId) {
-      this.emit("approval.resolved", "approval", approval.runId, "unknown", {
-        approvalId,
-        decision
-      });
+    if (!approval) {
+      throw new Error(`Approval not found: ${approvalId}`);
     }
+    this.store.resolveApproval(approvalId, decision);
+    this.emit("approval.resolved", "approval", approval.runId, approval.sessionId, {
+      approvalId,
+      decision
+    });
   }
 
   async getApprovalPolicy(): Promise<ApprovalPolicyConfig> {

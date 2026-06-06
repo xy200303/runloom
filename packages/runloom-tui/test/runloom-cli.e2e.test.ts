@@ -12,6 +12,8 @@ describe("runloom CLI e2e", () => {
       const result = await runCli(
         [
           "/help",
+          "/approvals",
+          "/approve approval_missing",
           "/git",
           "/session",
           "/session list",
@@ -35,6 +37,8 @@ describe("runloom CLI e2e", () => {
       expect(result.stderr).toBe("");
       expect(result.stdout).toContain("Runloom Code");
       expect(result.stdout).toContain("Commands:");
+      expect(result.stdout).toContain("Approvals: (none pending)");
+      expect(result.stdout).toContain("Approval decision failed: Approval not found");
       expect(result.stdout).toContain("[git]");
       expect(result.stdout).toContain("Session:");
       expect(result.stdout).toContain("Sessions:");

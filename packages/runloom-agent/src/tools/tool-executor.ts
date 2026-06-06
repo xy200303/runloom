@@ -40,7 +40,7 @@ export class ToolExecutor {
       permissions: tool.permissions
     });
 
-    const approval = this.checkApproval(tool, input, runId);
+    const approval = this.checkApproval(tool, input, runId, sessionId);
     if (approval) {
       this.options.saveApproval(approval);
       this.options.emit("approval.requested", "approval", runId, sessionId, approval);
@@ -93,7 +93,7 @@ export class ToolExecutor {
     }
   }
 
-  private checkApproval(tool: ToolDefinition, input: unknown, runId: string): ApprovalRequest | undefined {
+  private checkApproval(tool: ToolDefinition, input: unknown, runId: string, sessionId: string): ApprovalRequest | undefined {
     for (const scope of tool.permissions) {
       const mode = getApprovalMode(this.options.getApprovalPolicy(), scope);
       const risk = riskForScope(scope);
@@ -101,6 +101,7 @@ export class ToolExecutor {
         return {
           id: `approval_${randomUUID()}`,
           runId,
+          sessionId,
           scope,
           action: `tool:${tool.name}`,
           risk,

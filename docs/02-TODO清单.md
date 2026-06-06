@@ -38,7 +38,7 @@
 - [~] 实现最小动态 loop：已实现 submit、subscribe、active run cancel 和同进程 in-memory resume；仍需持久化 run 恢复与 approval 后续接续。
 - [x] 实现 todo store 和 `todo.updated` 事件。
 - [x] 实现基础工具注册和工具执行器。
-- [ ] 实现 approval request/resolution。
+- [x] 实现 approval request/resolution。
 - [x] 实现 approval policy：完全访问、请求批准、替我决定三种模式。
 - [ ] 支持按 permission scope 修改审批模式，并写入 audit trail。
 - [x] 实现 `~/.runloom/config.json` 全局配置读取，支持默认模型、provider 偏好和非敏感用户偏好。
@@ -129,9 +129,9 @@
 - [x] 嵌入式 TUI API：`createRunloomTuiApp`。
 - [ ] transcript 区、输入区、todo 区、tool activity 区、status 区。
 - [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态和 todo；仍需完整 activity panel 与事件回放。
-- [ ] approval 弹窗。
-- [ ] `/permissions` 权限审批设置面板。
-- [x] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/quit`。
+- [~] approval 弹窗：已实现 `/approvals`、`/approve`、`/deny` 命令式处理；仍需弹窗/快捷键 UI。
+- [~] `/permissions` 权限审批设置面板：已实现命令式读取和修改；仍需面板化展示。
+- [x] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/approvals`、`/approve`、`/deny`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/quit`。
 - [ ] 事件回放和滚动。
 
 验收标准：

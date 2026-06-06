@@ -5,6 +5,7 @@ import { APPROVAL_MODES, PERMISSION_SCOPES } from "runloom-agent";
 import type {
   ApprovalMode,
   ApprovalPolicyConfig,
+  ApprovalRequest,
   McpServerSummary,
   PermissionScope,
   RunloomAgent,
@@ -158,6 +159,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       case "approval.requested":
         output.write(`[approval] requested ${formatApprovalRequest(event.payload)}\n`);
         break;
+      case "approval.resolved":
+        output.write(`[approval] resolved ${formatApprovalResolution(event.payload)}\n`);
+        break;
       case "run.waiting_approval":
         output.write(`[run] waiting for approval ${formatWaitingApproval(event.payload)}\n\n`);
         break;
@@ -205,6 +209,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /approval      Show or update approval policy",
           "  /approval default <full_access|ask|auto_decide>",
           "  /approval <scope> <full_access|ask|auto_decide>",
+          "  /approvals     List pending approvals",
+          "  /approve <id>  Approve a pending approval",
+          "  /deny <id>     Deny a pending approval",
           "  /model        Show or set model overrides",
           "  /model set <provider:model|model>",
           "  /model profile <name>",
@@ -235,6 +242,17 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (command === "/tools") {
       const tools = await this.options.agent.listTools();
       output.write(formatTools(tools));
+      return;
+    }
+
+    if (command === "/approvals") {
+      const approvals = await this.options.agent.listApprovals();
+      output.write(formatApprovals(approvals));
+      return;
+    }
+
+    if (command.startsWith("/approve") || command.startsWith("/deny")) {
+      await this.handleApprovalDecisionCommand(command);
       return;
     }
 
@@ -461,6 +479,23 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write(`Approval mode for ${scope} set to ${mode}\n`);
   }
 
+  private async handleApprovalDecisionCommand(command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const [action, approvalId] = command.split(/\s+/);
+    if (!approvalId) {
+      output.write(`Missing approval id for ${action}\n`);
+      return;
+    }
+    const decision = action === "/approve" ? "approved" : "denied";
+    try {
+      await this.options.agent.resolveApproval(approvalId, { decision });
+      output.write(`Approval ${approvalId} ${decision}\n`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      output.write(`Approval decision failed: ${message}\n`);
+    }
+  }
+
   private handleModelCommand(command: string): void {
     const output = this.options.output ?? defaultOutput;
     const [, action, ...rest] = command.split(/\s+/);
@@ -571,6 +606,11 @@ function formatApprovalRequest(payload: unknown): string {
   return `${request.id ?? "unknown"} scope=${request.scope ?? "unknown"} mode=${request.mode ?? "unknown"} ${request.summary ?? ""}`;
 }
 
+function formatApprovalResolution(payload: unknown): string {
+  const resolution = payload as { approvalId?: string; decision?: { decision?: string } };
+  return `${resolution.approvalId ?? "unknown"} decision=${resolution.decision?.decision ?? "unknown"}`;
+}
+
 function formatWaitingApproval(payload: unknown): string {
   const waiting = payload as { approvalId?: string };
   return waiting.approvalId ? `approval=${waiting.approvalId}` : "";
@@ -600,6 +640,19 @@ function formatTools(tools: ToolSummary[]): string {
   for (const tool of tools) {
     const permissions = tool.permissions.length ? tool.permissions.join(", ") : "none";
     lines.push(`  ${tool.name} - ${tool.description} [${permissions}]`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatApprovals(approvals: ApprovalRequest[]): string {
+  if (approvals.length === 0) {
+    return "Approvals: (none pending)\n";
+  }
+  const lines = ["Approvals:"];
+  for (const approval of approvals) {
+    lines.push(
+      `  ${approval.id} run=${approval.runId} scope=${approval.scope} risk=${approval.risk} mode=${approval.mode} ${approval.summary}`
+    );
   }
   return `${lines.join("\n")}\n`;
 }

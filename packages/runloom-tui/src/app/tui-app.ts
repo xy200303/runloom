@@ -2,7 +2,15 @@ import { createInterface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
 import { APPROVAL_MODES, PERMISSION_SCOPES } from "runloom-agent";
-import type { ApprovalMode, ApprovalPolicyConfig, PermissionScope, RunloomAgent, RunloomEvent, Unsubscribe } from "runloom-agent";
+import type {
+  ApprovalMode,
+  ApprovalPolicyConfig,
+  PermissionScope,
+  RunloomAgent,
+  RunloomEvent,
+  ToolSummary,
+  Unsubscribe
+} from "runloom-agent";
 
 export interface CreateRunloomTuiAppOptions {
   agent: RunloomAgent;
@@ -135,6 +143,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /approval      Show or update approval policy",
           "  /approval default <full_access|ask|auto_decide>",
           "  /approval <scope> <full_access|ask|auto_decide>",
+          "  /tools         List registered coding tools",
           "  /quit          Exit"
         ].join("\n") + "\n"
       );
@@ -144,6 +153,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (command === "/status" || command === "/permissions") {
       const policy = await this.options.agent.getApprovalPolicy();
       output.write(formatApprovalPolicy(policy));
+      return;
+    }
+
+    if (command === "/tools") {
+      const tools = await this.options.agent.listTools();
+      output.write(formatTools(tools));
       return;
     }
 
@@ -241,6 +256,18 @@ function formatApprovalPolicy(policy: ApprovalPolicyConfig): string {
   const lines = [`Approval policy: default=${policy.defaultMode}`];
   for (const [scope, mode] of Object.entries(policy.scopes)) {
     lines.push(`  ${scope}: ${mode}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatTools(tools: ToolSummary[]): string {
+  if (tools.length === 0) {
+    return "No tools registered.\n";
+  }
+  const lines = ["Tools:"];
+  for (const tool of tools) {
+    const permissions = tool.permissions.length ? tool.permissions.join(", ") : "none";
+    lines.push(`  ${tool.name} - ${tool.description} [${permissions}]`);
   }
   return `${lines.join("\n")}\n`;
 }

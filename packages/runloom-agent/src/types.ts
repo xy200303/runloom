@@ -119,6 +119,13 @@ export interface ToolExecutionResult<TOutput = unknown> {
   durationMs: number;
 }
 
+export interface ToolSummary {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  permissions: PermissionScope[];
+}
+
 export interface SubmitOptions {
   sessionId?: string;
   signal?: AbortSignal;
@@ -344,6 +351,7 @@ export interface CreateRunloomAgentOptions {
 export interface RunloomAgent {
   submit(input: string | RunloomInput, options?: SubmitOptions): Promise<RunResult>;
   executeTool<TOutput = unknown>(name: string, input: unknown, options?: ExecuteToolOptions): Promise<ToolExecutionResult<TOutput>>;
+  listTools(): Promise<ToolSummary[]>;
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe;
   listSessions(options?: ListSessionsOptions): Promise<RunloomSession[]>;
   getSession(sessionId: string): Promise<RunloomSession>;

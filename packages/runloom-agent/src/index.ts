@@ -49,6 +49,7 @@ export type {
   ToolContext,
   ToolDefinition,
   ToolExecutionResult,
+  ToolSummary,
   Unsubscribe,
   VerificationResult,
   WorkspaceAdapter

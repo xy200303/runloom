@@ -29,6 +29,16 @@ test("approval command updates scope and default modes", async () => {
     async getApprovalPolicy() {
       return policy;
     },
+    async listTools() {
+      return [
+        {
+          name: "fs.read",
+          description: "Read a file",
+          inputSchema: {},
+          permissions: ["filesystem.read"]
+        }
+      ];
+    },
     async updateApprovalPolicy(patch) {
       if (patch.defaultMode) {
         policy.defaultMode = patch.defaultMode;
@@ -51,6 +61,7 @@ test("approval command updates scope and default modes", async () => {
 
   await app.runCommand("/approval shell full_access");
   await app.runCommand("/approval default auto_decide");
+  await app.runCommand("/tools");
   await app.runCommand("/quit");
 
   const text = output.toString();
@@ -59,6 +70,7 @@ test("approval command updates scope and default modes", async () => {
   assert.equal(closed, true);
   assert.match(text, /Approval mode for shell set to full_access/);
   assert.match(text, /Approval default mode set to auto_decide/);
+  assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
 });
 
 class MemoryOutput extends Writable {

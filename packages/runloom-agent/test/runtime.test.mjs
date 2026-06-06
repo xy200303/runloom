@@ -268,6 +268,25 @@ test("built-in coding tools operate on real workspace data", async () => {
   await agent.close();
 });
 
+test("built-in tools can be listed for host adapters", async () => {
+  const agent = await createRunloomAgent({
+    provider: "openai-responses",
+    model: "gpt-4.1",
+    workspace: process.cwd(),
+    apiKey: ""
+  });
+
+  const tools = await agent.listTools();
+  const readTool = tools.find((tool) => tool.name === "fs.read");
+  const shellTool = tools.find((tool) => tool.name === "shell.verify");
+
+  assert.ok(readTool);
+  assert.equal(readTool.permissions[0], "filesystem.read");
+  assert.ok(shellTool);
+  assert.equal(shellTool.permissions[0], "shell");
+  await agent.close();
+});
+
 test("shell verification is governed by approval policy", async () => {
   const defaultAgent = await createRunloomAgent({
     provider: "openai-responses",

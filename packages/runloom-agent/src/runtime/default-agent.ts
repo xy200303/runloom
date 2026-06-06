@@ -29,6 +29,7 @@ import type {
   SubmitOptions,
   ToolDefinition,
   ToolExecutionResult,
+  ToolSummary,
   Unsubscribe
 } from "../types.js";
 
@@ -195,6 +196,17 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async listSessions(): Promise<RunloomSession[]> {
     return this.store.listSessions(this.workspace);
+  }
+
+  async listTools(): Promise<ToolSummary[]> {
+    return [...this.tools.values()]
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        permissions: [...tool.permissions]
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getSession(sessionId: string): Promise<RunloomSession> {

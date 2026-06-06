@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/runloom-agent" },
+    { "path": "packages/runloom-tui" }
+  ]
+}

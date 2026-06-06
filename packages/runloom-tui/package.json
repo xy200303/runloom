@@ -1,0 +1,30 @@
+{
+  "name": "runloom-tui",
+  "version": "0.1.0",
+  "description": "Terminal UI and CLI for Runloom.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "runloom": "./dist/bin/runloom.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "examples"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "dev": "node ./dist/bin/runloom.js"
+  },
+  "dependencies": {
+    "runloom-agent": "workspace:*"
+  }
+}

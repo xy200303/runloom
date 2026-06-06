@@ -39,12 +39,32 @@
 - [ ] 支持按 permission scope 修改审批模式，并写入 audit trail。
 - [ ] 实现 workspace path guard 和 redaction 初版。
 - [ ] 实现错误类型和结构化日志接口。
+- [ ] 实现 coding task 基础上下文：workspace 摘要、package 信息、git 状态和用户未提交变更提示。
+- [ ] 预留横向扩展接口：workspace、terminal、diff、approval、diagnostics host adapters。
 
 验收标准：
 
 - 示例代码可以提交“阅读 package.json 并总结项目”。
 - 测试代码覆盖文本、工具调用、approval 和取消；产品示例不使用 mock 数据。
 - 所有 UI 事件都来自 `runloom-agent`。
+
+## Phase 1.5：专业编程开发闭环
+
+- [ ] 文件工具：list/read/search/write/patch，全部受 workspace guard 和 approval policy 控制。
+- [ ] Diff 工具：生成、展示和记录 unified diff。
+- [ ] Shell 验证工具：运行用户或项目配置的 typecheck/test/build 命令。
+- [ ] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。
+- [ ] 代码修改计划：高风险修改前生成 edit plan，说明目标文件、风险和验证命令。
+- [ ] 用户改动保护：修改前检测目标文件是否已有用户未提交变更，避免覆盖。
+- [ ] Review 模式：支持用户要求 code review 时优先输出 bug、风险和缺失测试。
+- [ ] 最终交付摘要：输出修改文件、核心变更、验证结果、失败项和剩余风险。
+
+验收标准：
+
+- Runloom 能完成一个真实小型 TypeScript 项目的“读代码 -> 改文件 -> 跑测试 -> 总结”闭环。
+- 所有文件写入和 shell 命令进入 approval policy。
+- 每次修改都有 diff、证据和可回滚线索。
+- 不覆盖用户已有改动。
 
 ## Phase 2：pi-agent 集成
 
@@ -59,6 +79,24 @@
 
 - public API 不泄露 pi-agent 类型。
 - pi-agent 运行时产生的文本、tool、todo、error 均能转换为 Runloom 事件。
+
+## Phase 2.5：横向扩展与 VSCode 插件准备
+
+- [ ] 定义 `RunloomHostAdapter`。
+- [ ] 定义 `WorkspaceAdapter`，支持未来 VSCode multi-root 和 virtual workspace。
+- [ ] 定义 `TerminalAdapter`，隔离 shell 执行与宿主 terminal。
+- [ ] 定义 `DiffAdapter`，支持未来 VSCode diff editor 和 inline diff。
+- [ ] 定义 `ApprovalBridge`，支持跨 UI 处理 approval。
+- [ ] 定义 `DiagnosticsAdapter`，为 VSCode Problems/diagnostics 预留上下文入口。
+- [ ] 设计 future `extensions/runloom-vscode` 目录，不进入首期实现。
+- [ ] 确保 `runloom-agent` 不依赖 VSCode API、TUI API 或 Web API。
+
+验收标准：
+
+- `runloom-agent` 可以在没有 TUI 的情况下通过 host adapter 生命周期运行。
+- VSCode 插件未来只需要实现 adapters 和 UI，不需要重写 runtime。
+- approval、event replay、session resume/cancel 均不绑定单一 UI。
+- 首期仓库没有半成品 VSCode extension runtime。
 
 ## Phase 3：模型协议适配
 
@@ -81,9 +119,10 @@
 - [ ] CLI bin：`runloom`。
 - [ ] 嵌入式 TUI API：`createRunloomTuiApp`。
 - [ ] transcript 区、输入区、todo 区、tool activity 区、status 区。
+- [ ] coding activity 展示：文件读取、patch、diff、测试命令、git 状态。
 - [ ] approval 弹窗。
 - [ ] `/permissions` 权限审批设置面板。
-- [ ] 基础命令：`/help`、`/status`、`/model`、`/session`、`/todo`、`/skills`、`/mcp`、`/stop`、`/resume`、`/quit`。
+- [ ] 基础命令：`/help`、`/status`、`/model`、`/session`、`/todo`、`/diff`、`/git`、`/tests`、`/review`、`/skills`、`/mcp`、`/stop`、`/resume`、`/quit`。
 - [ ] 事件回放和滚动。
 
 验收标准：
@@ -129,7 +168,7 @@
 - [ ] `ExternalAgentAdapter` 接口。
 - [ ] Codex adapter。
 - [ ] Claude Code adapter。
-- [ ] xclaw adapter。
+- [ ] 其他本地 coding agent adapter 扩展点。
 - [ ] 外部委托的 workspace、权限、最大轮数、输出格式限制。
 - [ ] 委托事件、日志和 audit trail。
 - [ ] A2A discovery、capability、delegation、result exchange。
@@ -195,6 +234,23 @@
 - approval 弹窗能驱动 agent 继续执行。
 - Web 可以修改权限审批方式，并展示策略变更审计。
 - `runloom-web` 可独立 build、typecheck、pack dry run。
+
+## Phase 11：VSCode 插件实现（后期）
+
+- [ ] 创建 `extensions/runloom-vscode`。
+- [ ] 使用 VSCode Extension API + TypeScript。
+- [ ] 实现 workspace、terminal、diff、approval、diagnostics adapters。
+- [ ] 提供 Runloom sidebar/chat view。
+- [ ] 提供 Todo Tree、Tool Activity、Approval Center。
+- [ ] 集成 VSCode diff editor、Problems、integrated terminal、command palette。
+- [ ] 支持命令：Open Chat、Fix Selection、Review Workspace Changes、Run Tests and Fix、Show Diff、Approval Settings。
+- [ ] 支持 Workspace Trust，未信任 workspace 默认禁用写文件、shell、MCP tools 和自我演化。
+
+验收标准：
+
+- VSCode 插件只调用 `runloom-agent` public API。
+- VSCode 插件不重新实现模型、工具、session、approval 或 agent loop。
+- VSCode 中的文件写入、shell、diff、approval 都可审计和回放。
 
 ## 长期验收标准
 

@@ -2,11 +2,12 @@
 
 ## 定位
 
-`runloom-tui` 是 Runloom 的终端交互界面。它既提供 CLI bin，也提供可嵌入 TUI app。TUI 不实现 agent 逻辑，只消费 `runloom-agent` 的 public API 和事件。
+`runloom-tui` 是 Runloom 的终端交互界面，目标是成为专业编程开发工具的主入口。它既提供 CLI bin，也提供可嵌入 TUI app。TUI 不实现 agent 逻辑，只消费 `runloom-agent` 的 public API 和事件。
 
 ## 设计目标
 
-- 像 Claude Code / xclaw 一样支持持续 transcript、输入、工具活动和状态反馈。
+- 像 Codex / Claude Code 一样支持持续 transcript、输入、工具活动和状态反馈。
+- 面向真实 coding 任务展示文件读取、patch、diff、测试命令、git 状态和验证结果。
 - 让用户清楚看到 agent 当前在做什么、用过什么工具、todo 进度和审批请求。
 - 支持长任务运行、取消、恢复、事件回放和 session 切换。
 - 展示 Skills、MCP、外部 agent、本地成长和 eval 状态。
@@ -45,6 +46,7 @@ await app.start();
 | - assistant deltas                                                             |
 | - reasoning summary                                                            |
 | - tool calls and results                                                       |
+| - file edits, diffs, test results, git notices                                  |
 | - external agent activity                                                      |
 | - eval/growth notices                                                          |
 +--------------------------------------+-----------------------------------------+
@@ -71,6 +73,10 @@ TUI 渲染只依赖 `RunloomEvent`：
 | `tool.call.requested` | activity 中显示待执行工具 |
 | `tool.call.started` | 显示 running |
 | `tool.call.completed` | 显示结果摘要，可展开 |
+| `coding.diff.created` | 显示 diff 摘要，可展开查看 |
+| `coding.verification.started` | 显示验证命令 |
+| `coding.verification.completed` | 显示测试或构建结果 |
+| `coding.git.status` | 显示分支、dirty 状态和用户改动风险 |
 | `approval.requested` | 打开 approval 面板 |
 | `todo.updated` | 更新 Todo Panel |
 | `skill.activated` | activity 中显示 skill 名称和原因 |
@@ -94,6 +100,10 @@ TUI 不解析供应商原始 streaming event。
 - `/session switch <id>`：切换 session。
 - `/todo`：显示 todo。
 - `/tools`：显示可用工具。
+- `/diff`：显示当前 run 产生的 diff 摘要。
+- `/git`：显示当前 workspace git 状态。
+- `/tests`：显示最近验证命令和结果。
+- `/review`：进入代码审查输出模式。
 - `/permissions`：查看和修改权限审批模式。
 - `/approval`：同 `/permissions`，聚焦 approval policy。
 - `/skills`：显示 skills。
@@ -206,6 +216,23 @@ Todo panel 展示：
 - approval 状态。
 
 支持展开查看详细输出，但默认要 redaction 后展示。
+
+## Coding Activity
+
+TUI 需要把编程开发活动作为一等状态展示：
+
+- 文件读取：文件路径、读取原因、是否命中 allowed roots。
+- 文件修改：目标文件、patch 摘要、是否需要 approval。
+- Diff：新增/删除行数、文件列表、可展开 unified diff。
+- 测试验证：命令、耗时、退出码、失败摘要。
+- Git 状态：当前分支、dirty files、用户未提交改动风险。
+- Review：发现的问题、严重程度、文件位置和建议验证方式。
+
+原则：
+
+- TUI 不直接读写文件或执行 git/shell。
+- 所有信息来自 `runloom-agent` 事件和 public API。
+- 对会修改文件或运行命令的动作，TUI 只展示 approval 并回传用户决定。
 
 ## Skills/MCP/A2A/成长状态
 

@@ -2,7 +2,7 @@
 
 ## 定位
 
-Codex、Claude Code、xclaw 等外部 coding agent 不属于 `ModelProvider`。它们不是“一个模型 API”，而是能执行任务、调用工具、修改文件、产生日志和中间事件的 agent runtime。
+Codex、Claude Code 等外部 coding agent 不属于 `ModelProvider`。它们不是“一个模型 API”，而是能执行任务、调用工具、修改文件、产生日志和中间事件的 agent runtime。
 
 Runloom 通过 `ExternalAgentAdapter`、subagent 和 A2A peer 接入它们。
 
@@ -126,20 +126,16 @@ Runloom 仍然是主控者：
 - Claude Code 的工具调用必须受 Runloom policy 限制。
 - 最终结果作为外部证据进入主 loop。
 
-## xclaw Adapter
+## 其他本地 Coding Agent Adapter
 
-xclaw adapter 可复用其本地 agent runtime 和 LeapAgent API 风格：
+Runloom 应保留通用 adapter 扩展点，用于接入其他本地 coding agent、团队内部 specialist agent 或服务化开发助手。
 
-- 调用 xclaw 的 API/Gateway。
-- 使用 stateful conversation 或 run events。
-- 映射 xclaw SSE 到 Runloom external events。
-- 复用 xclaw 的本地工具能力，但权限仍由 Runloom 委托策略约束。
+通用要求：
 
-适合场景：
-
-- 文件分析。
-- 飞书/平台网关任务。
-- 已有 xclaw specialist agent 能力。
+- 通过 `ExternalAgentAdapter` 接口接入。
+- 支持受限 workspace、权限、最大轮数、超时和输出格式。
+- 中间日志、工具活动、文件变更和最终结果都转换为 Runloom external events。
+- 外部 agent 结果必须回到 Runloom 主 loop，由 Runloom 验证和决定是否采纳。
 
 ## 外部事件映射
 

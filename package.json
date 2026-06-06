@@ -1,0 +1,21 @@
+{
+  "name": "runloom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runloom: a local coding agent runtime for professional software development.",
+  "packageManager": "pnpm@10.6.2",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/runloom-agent packages/runloom-tui",
+    "typecheck": "tsc -b packages/runloom-agent packages/runloom-tui --pretty false",
+    "test": "pnpm build && node --test",
+    "pack:dry": "npm pack --dry-run --workspace runloom-agent && npm pack --dry-run --workspace runloom-tui"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.9.3"
+  }
+}

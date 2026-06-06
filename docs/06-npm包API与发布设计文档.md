@@ -30,6 +30,12 @@ agent.subscribe((event) => {
 await agent.submit("阅读 package.json 并总结项目");
 ```
 
+专业编程任务示例：
+
+```ts
+await agent.submit("修复当前 TypeScript 测试失败，修改后运行验证命令并总结 diff");
+```
+
 建议导出：
 
 ```ts
@@ -65,6 +71,16 @@ export interface RunloomAgent {
 - `ModelProvider`
 - `ToolDefinition`
 - `ToolContext`
+- `CodingTaskSummary`
+- `CodeEditPlan`
+- `RunloomDiffSummary`
+- `VerificationResult`
+- `RunloomHostAdapter`
+- `WorkspaceAdapter`
+- `TerminalAdapter`
+- `DiffAdapter`
+- `ApprovalBridge`
+- `DiagnosticsAdapter`
 - `ExternalAgentAdapter`
 - `SkillManifest`
 - `McpServerConfig`
@@ -144,6 +160,35 @@ await agent.updateApprovalPolicy({
 ```
 
 审批策略变更必须产生事件和审计记录。更改默认权限模式、放宽某个 scope 或把 `ask` 改成 `full_access` 属于安全敏感变更。
+
+## Host Adapter API
+
+为了支持横向扩展和未来 VSCode 插件，`runloom-agent` 需要提供宿主环境抽象。TUI、后期 Vue Web、VSCode 插件、local daemon 和 CI bot 都通过这些接口接入。
+
+```ts
+export interface RunloomHostAdapter {
+  kind: "tui" | "vscode" | "web" | "daemon" | "ci" | "custom";
+  workspace: WorkspaceAdapter;
+  terminal?: TerminalAdapter;
+  diff?: DiffAdapter;
+  approvals?: ApprovalBridge;
+  diagnostics?: DiagnosticsAdapter;
+}
+
+export interface WorkspaceAdapter {
+  root: string;
+  listFiles(query: WorkspaceFileQuery): Promise<WorkspaceFile[]>;
+  readFile(path: string): Promise<WorkspaceFileContent>;
+  applyPatch(patch: UnifiedPatch, options?: ApplyPatchOptions): Promise<PatchResult>;
+  getGitStatus?(): Promise<GitStatusSummary>;
+}
+
+export interface ApprovalBridge {
+  requestApproval(request: ApprovalRequest): Promise<ApprovalDecision>;
+}
+```
+
+这些类型是为了让 VSCode 插件后期只实现适配器和 UI，不重写 runtime。`runloom-agent` 不能依赖 VSCode API。
 
 ## runloom-tui Public API
 

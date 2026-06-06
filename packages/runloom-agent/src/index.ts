@@ -5,6 +5,7 @@ export async function createRunloomAgent(options: CreateRunloomAgentOptions): Pr
   return new DefaultRunloomAgent(options);
 }
 
+export { APPROVAL_MODES, PERMISSION_SCOPES } from "./approvals/policy.js";
 export { OpenAIResponsesProvider } from "./providers/openai-responses-provider.js";
 export type {
   ApprovalBridge,

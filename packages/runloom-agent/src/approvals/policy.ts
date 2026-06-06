@@ -1,5 +1,26 @@
 import type { ApprovalMode, ApprovalPolicyConfig, ApprovalPolicyPatch, PermissionScope } from "../types.js";
 
+export const APPROVAL_MODES = ["full_access", "ask", "auto_decide"] as const satisfies readonly ApprovalMode[];
+
+export const PERMISSION_SCOPES = [
+  "filesystem.read",
+  "filesystem.write",
+  "filesystem.delete",
+  "shell",
+  "network",
+  "browser",
+  "gui",
+  "mcp.tools",
+  "external_agents",
+  "a2a.delegation",
+  "memory.write",
+  "identity.write",
+  "tools.register",
+  "skills.register",
+  "evolution.apply",
+  "npm.publish"
+] as const satisfies readonly PermissionScope[];
+
 const DEFAULT_SCOPES: Partial<Record<PermissionScope, ApprovalMode>> = {
   "filesystem.read": "full_access",
   "filesystem.write": "ask",

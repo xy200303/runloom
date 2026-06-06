@@ -1,7 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
-import type { ApprovalPolicyConfig, RunloomAgent, RunloomEvent, Unsubscribe } from "runloom-agent";
+import { APPROVAL_MODES, PERMISSION_SCOPES } from "runloom-agent";
+import type { ApprovalMode, ApprovalPolicyConfig, PermissionScope, RunloomAgent, RunloomEvent, Unsubscribe } from "runloom-agent";
 
 export interface CreateRunloomTuiAppOptions {
   agent: RunloomAgent;
@@ -12,6 +13,7 @@ export interface CreateRunloomTuiAppOptions {
 export interface RunloomTuiApp {
   start(): Promise<void>;
   stop(): Promise<void>;
+  runCommand(command: string): Promise<void>;
   render(event: RunloomEvent): void;
 }
 
@@ -35,12 +37,23 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write("Type /help for commands. Type /quit to exit.\n\n");
 
     while (!this.stopped) {
-      const line = (await rl.question("runloom> ")).trim();
+      let answer: string;
+      try {
+        answer = await rl.question("runloom> ");
+      } catch (error) {
+        if (isReadlineClosedError(error)) {
+          await this.stop();
+          break;
+        }
+        throw error;
+      }
+
+      const line = answer.trim();
       if (!line) {
         continue;
       }
       if (line.startsWith("/")) {
-        await this.handleCommand(line);
+        await this.runCommand(line);
         continue;
       }
       await this.options.agent.submit(line);
@@ -84,6 +97,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       case "approval.policy.updated":
         output.write(`[approval] policy updated\n${formatApprovalPolicy(event.payload as ApprovalPolicyConfig)}\n`);
         break;
+      case "approval.requested":
+        output.write(`[approval] requested ${formatApprovalRequest(event.payload)}\n`);
+        break;
+      case "run.waiting_approval":
+        output.write(`[run] waiting for approval ${formatWaitingApproval(event.payload)}\n\n`);
+        break;
       case "run.completed":
         output.write("[run] completed\n\n");
         break;
@@ -98,7 +117,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
   }
 
-  private async handleCommand(command: string): Promise<void> {
+  async runCommand(command: string): Promise<void> {
     const output = this.options.output ?? defaultOutput;
 
     if (command === "/quit" || command === "/exit") {
@@ -113,6 +132,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /help          Show this help",
           "  /status        Show session and approval status",
           "  /permissions   Show approval policy",
+          "  /approval      Show or update approval policy",
+          "  /approval default <full_access|ask|auto_decide>",
+          "  /approval <scope> <full_access|ask|auto_decide>",
           "  /quit          Exit"
         ].join("\n") + "\n"
       );
@@ -125,7 +147,51 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
+    if (command.startsWith("/approval")) {
+      await this.handleApprovalCommand(command);
+      return;
+    }
+
     output.write(`Unknown command: ${command}\n`);
+  }
+
+  private async handleApprovalCommand(command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const [, target, modeText] = command.split(/\s+/);
+
+    if (!target) {
+      const policy = await this.options.agent.getApprovalPolicy();
+      output.write(formatApprovalPolicy(policy));
+      output.write(formatApprovalCommandHelp());
+      return;
+    }
+
+    const mode = parseApprovalMode(modeText);
+    if (!mode) {
+      output.write(`Invalid approval mode: ${modeText ?? "(missing)"}\n`);
+      output.write(formatApprovalCommandHelp());
+      return;
+    }
+
+    if (target === "default") {
+      await this.options.agent.updateApprovalPolicy({ defaultMode: mode });
+      output.write(`Approval default mode set to ${mode}\n`);
+      return;
+    }
+
+    const scope = parsePermissionScope(target);
+    if (!scope) {
+      output.write(`Invalid permission scope: ${target}\n`);
+      output.write(formatScopeList());
+      return;
+    }
+
+    await this.options.agent.updateApprovalPolicy({
+      scopes: {
+        [scope]: mode
+      }
+    });
+    output.write(`Approval mode for ${scope} set to ${mode}\n`);
   }
 }
 
@@ -157,10 +223,46 @@ function formatErrorPayload(payload: unknown): string {
   return JSON.stringify(payload);
 }
 
+function isReadlineClosedError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ERR_USE_AFTER_CLOSE");
+}
+
+function formatApprovalRequest(payload: unknown): string {
+  const request = payload as { id?: string; scope?: string; mode?: string; summary?: string };
+  return `${request.id ?? "unknown"} scope=${request.scope ?? "unknown"} mode=${request.mode ?? "unknown"} ${request.summary ?? ""}`;
+}
+
+function formatWaitingApproval(payload: unknown): string {
+  const waiting = payload as { approvalId?: string };
+  return waiting.approvalId ? `approval=${waiting.approvalId}` : "";
+}
+
 function formatApprovalPolicy(policy: ApprovalPolicyConfig): string {
   const lines = [`Approval policy: default=${policy.defaultMode}`];
   for (const [scope, mode] of Object.entries(policy.scopes)) {
     lines.push(`  ${scope}: ${mode}`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+function parseApprovalMode(value: string | undefined): ApprovalMode | undefined {
+  return APPROVAL_MODES.includes(value as ApprovalMode) ? (value as ApprovalMode) : undefined;
+}
+
+function parsePermissionScope(value: string): PermissionScope | undefined {
+  return PERMISSION_SCOPES.includes(value as PermissionScope) ? (value as PermissionScope) : undefined;
+}
+
+function formatApprovalCommandHelp(): string {
+  return [
+    "Usage:",
+    "  /approval",
+    "  /approval default <full_access|ask|auto_decide>",
+    "  /approval <scope> <full_access|ask|auto_decide>",
+    formatScopeList().trimEnd()
+  ].join("\n") + "\n";
+}
+
+function formatScopeList(): string {
+  return `Scopes: ${PERMISSION_SCOPES.join(", ")}\n`;
 }

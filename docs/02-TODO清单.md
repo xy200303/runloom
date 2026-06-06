@@ -9,12 +9,15 @@
 
 ## Phase 0：项目骨架与发布底座
 
-- [ ] 创建 monorepo 根配置：`package.json`、workspace、TypeScript、lint、test、build。
-- [ ] 创建 `packages/runloom-agent`、`packages/runloom-tui`。
-- [ ] 预留 `runloom-web` 设计文档和包边界说明，但不进入首期实现和发布。
-- [ ] `runloom-agent`、`runloom-tui` 补齐独立 `package.json`、`README.md`、`src/index.ts`、`examples/`。
-- [ ] `runloom-agent`、`runloom-tui` 输出 ESM 和 `.d.ts`。
-- [ ] `runloom-agent`、`runloom-tui` 配置 `exports`，禁止用户依赖内部路径。
+- [x] 创建 monorepo 根配置：`package.json`、workspace、TypeScript、test、build。
+- [x] 创建 `packages/runloom-agent`、`packages/runloom-tui`。
+- [x] 预留 `runloom-web` 设计文档和包边界说明，但不进入首期实现和发布。
+- [x] `runloom-agent`、`runloom-tui` 补齐独立 `package.json`、`README.md`、`src/index.ts`、`examples/`。
+- [x] `runloom-agent`、`runloom-tui` 输出 ESM 和 `.d.ts`。
+- [x] `runloom-agent`、`runloom-tui` 配置 `exports`，禁止用户依赖内部路径。
+- [x] 增加 Vitest 分层测试配置：unit、integration、contract、security、e2e 和 shared config。
+- [x] 默认测试脚本接入 unit tests，并保留现有 Node.js 集成测试入口。
+- [ ] 建立 lint 配置和脚本。
 - [ ] 建立 Changesets 或等价版本管理。
 - [ ] 建立 GitHub Actions：typecheck、test、build、pack、publish dry run。
 - [ ] 建立 changelog 和 release checklist。
@@ -27,24 +30,24 @@
 
 ## Phase 1：runloom-agent 最小 runtime
 
-- [ ] 定义 public API：`createRunloomAgent`、`RunloomAgent`、`RunloomEvent`、`ModelProvider`、`ToolDefinition`。
+- [x] 定义 public API：`createRunloomAgent`、`RunloomAgent`、`RunloomEvent`、`ModelProvider`、`ToolDefinition`。
 - [ ] 实现 session、run、message、event 基础 store。
-- [ ] 接入至少一个真实模型协议 adapter，保证最小 runtime 不依赖 mock 数据。
-- [ ] 测试代码可提供 test-only provider，覆盖文本输出、tool call 和错误注入。
+- [x] 接入至少一个真实模型协议 adapter，保证最小 runtime 不依赖 mock 数据。
+- [x] 测试代码可提供 test-only provider，覆盖文本输出、tool call 和错误注入。
 - [ ] 实现最小动态 loop：submit、subscribe、cancel、resume。
-- [ ] 实现 todo store 和 `todo.updated` 事件。
-- [ ] 实现基础工具注册和工具执行器。
+- [x] 实现 todo store 和 `todo.updated` 事件。
+- [x] 实现基础工具注册和工具执行器。
 - [ ] 实现 approval request/resolution。
-- [ ] 实现 approval policy：完全访问、请求批准、替我决定三种模式。
+- [x] 实现 approval policy：完全访问、请求批准、替我决定三种模式。
 - [ ] 支持按 permission scope 修改审批模式，并写入 audit trail。
-- [ ] 实现 `~/.runloom/config.json` 全局配置读取，支持默认模型、provider 偏好和非敏感用户偏好。
-- [ ] 支持 workspace `.runloom/config.json` 覆盖全局配置，但禁止在仓库配置中保存 secret。
-- [ ] 实现任务画像模型路由：前端设计、Go 开发、原型设计、代码审查和测试修复可以命中不同模型。
-- [ ] 产生 `model.selection.resolved` 事件，记录 provider、model、命中规则和选择原因。
+- [x] 实现 `~/.runloom/config.json` 全局配置读取，支持默认模型、provider 偏好和非敏感用户偏好。
+- [x] 支持 workspace `.runloom/config.json` 覆盖全局配置，但禁止在仓库配置中保存 secret。
+- [x] 实现任务画像模型路由：前端设计、Go 开发、原型设计、代码审查和测试修复可以命中不同模型。
+- [x] 产生 `model.selection.resolved` 事件，记录 provider、model、命中规则和选择原因。
 - [ ] 实现 workspace path guard 和 redaction 初版。
 - [ ] 实现错误类型和结构化日志接口。
-- [ ] 实现 coding task 基础上下文：workspace 摘要、package 信息、git 状态和用户未提交变更提示。
-- [ ] 预留横向扩展接口：workspace、terminal、diff、approval、diagnostics host adapters。
+- [x] 实现 coding task 基础上下文：workspace 摘要、package 信息、git 状态和用户未提交变更提示。
+- [x] 预留横向扩展接口：workspace、terminal、diff、approval、diagnostics host adapters。
 
 验收标准：
 
@@ -56,8 +59,8 @@
 
 - [ ] 文件工具：list/read/search/write/patch，全部受 workspace guard 和 approval policy 控制。
 - [ ] Diff 工具：生成、展示和记录 unified diff。
-- [ ] Shell 验证工具：运行用户或项目配置的 typecheck/test/build 命令。
-- [ ] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。
+- [x] Shell 验证工具：运行用户或项目配置的 typecheck/test/build 命令。
+- [x] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。
 - [ ] 代码修改计划：高风险修改前生成 edit plan，说明目标文件、风险和验证命令。
 - [ ] 用户改动保护：修改前检测目标文件是否已有用户未提交变更，避免覆盖。
 - [ ] Review 模式：支持用户要求 code review 时优先输出 bug、风险和缺失测试。
@@ -105,12 +108,12 @@
 ## Phase 3：模型协议适配
 
 - [ ] OpenAI-compatible Chat Completions adapter。
-- [ ] OpenAI Responses adapter。
+- [x] OpenAI Responses adapter。
 - [ ] Anthropic Claude Messages adapter。
 - [ ] Google Gemini adapter。
 - [ ] 统一 messages、tools、tool calls、streaming、usage、reasoning、structured output。
 - [ ] provider retry、timeout、rate limit 和 error normalization。
-- [ ] 模型选择层不读取 provider secret，只解析 `.runloom` 中的非敏感路由配置。
+- [x] 模型选择层不读取 provider secret，只解析 `.runloom` 中的非敏感路由配置。
 - [ ] provider compatibility tests。
 
 验收标准：
@@ -121,13 +124,13 @@
 
 ## Phase 4：TUI 最小产品
 
-- [ ] CLI bin：`runloom`。
-- [ ] 嵌入式 TUI API：`createRunloomTuiApp`。
+- [x] CLI bin：`runloom`。
+- [x] 嵌入式 TUI API：`createRunloomTuiApp`。
 - [ ] transcript 区、输入区、todo 区、tool activity 区、status 区。
 - [ ] coding activity 展示：文件读取、patch、diff、测试命令、git 状态。
 - [ ] approval 弹窗。
 - [ ] `/permissions` 权限审批设置面板。
-- [ ] 基础命令：`/help`、`/status`、`/model`、`/session`、`/todo`、`/diff`、`/git`、`/tests`、`/review`、`/skills`、`/mcp`、`/stop`、`/resume`、`/quit`。
+- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/quit`；仍需 `/session`、`/todo`、`/diff`、`/git`、`/tests`、`/review`、`/skills`、`/mcp`、`/stop`、`/resume`。
 - [ ] 事件回放和滚动。
 
 验收标准：
@@ -139,11 +142,11 @@
 
 ## Phase 5：runloom-web 暂缓
 
-- [ ] 首期不实现 `runloom-web`。
-- [ ] 首期不发布 `runloom-web` npm 包。
-- [ ] 保留 Web 设计文档、API 边界和后期验收标准。
-- [ ] 明确后期技术栈：Vue 3 + TypeScript + Vite。
-- [ ] 后期 Web 必须复用 `runloom-agent`，不重新实现 runtime。
+- [x] 首期不实现 `runloom-web`。
+- [x] 首期不发布 `runloom-web` npm 包。
+- [x] 保留 Web 设计文档、API 边界和后期验收标准。
+- [x] 明确后期技术栈：Vue 3 + TypeScript + Vite。
+- [x] 后期 Web 必须复用 `runloom-agent`，不重新实现 runtime。
 
 验收标准：
 

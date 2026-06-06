@@ -13,6 +13,10 @@ describe("runloom CLI e2e", () => {
         [
           "/help",
           "/git",
+          "/session",
+          "/session list",
+          "/todo",
+          "/diff",
           "/model profile frontend_design",
           "/model",
           "/model clear",
@@ -26,6 +30,10 @@ describe("runloom CLI e2e", () => {
       expect(result.stdout).toContain("Runloom Code");
       expect(result.stdout).toContain("Commands:");
       expect(result.stdout).toContain("[git]");
+      expect(result.stdout).toContain("Session:");
+      expect(result.stdout).toContain("Sessions:");
+      expect(result.stdout).toContain("Todo: (none)");
+      expect(result.stdout).toContain("Diff:");
       expect(result.stdout).toContain("Model profile set to frontend_design");
       expect(result.stdout).toContain("profile: frontend_design");
       expect(result.stdout).toContain("Model overrides cleared");

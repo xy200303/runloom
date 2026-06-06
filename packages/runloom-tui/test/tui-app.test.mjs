@@ -15,13 +15,21 @@ test("approval command updates scope and default modes", async () => {
   let closed = false;
   const submissions = [];
   const toolCalls = [];
+  const sessions = [
+    {
+      id: "ses_tool",
+      workspace: process.cwd(),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:01.000Z"
+    }
+  ];
 
   const agent = {
     subscribe() {
       return () => {};
     },
-    async submit(input) {
-      submissions.push(input);
+    async submit(input, options) {
+      submissions.push({ input, options });
       return {
         runId: "run_test",
         sessionId: "ses_test",
@@ -41,6 +49,16 @@ test("approval command updates scope and default modes", async () => {
           permissions: ["filesystem.read"]
         }
       ];
+    },
+    async listSessions() {
+      return sessions;
+    },
+    async getSession(sessionId) {
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+      return session;
     },
     async executeTool(name, input) {
       toolCalls.push({ name, input });
@@ -75,6 +93,21 @@ test("approval command updates scope and default modes", async () => {
           durationMs: 12
         };
       }
+      if (name === "git.diff") {
+        return {
+          toolName: name,
+          runId: "run_tool",
+          sessionId: "ses_tool",
+          status: "completed",
+          output: {
+            filesChanged: ["packages/runloom-tui/src/app/tui-app.ts"],
+            additions: 4,
+            deletions: 1,
+            patch: "--- a/packages/runloom-tui/src/app/tui-app.ts\n+++ b/packages/runloom-tui/src/app/tui-app.ts\n@@\n-old\n+new\n"
+          },
+          durationMs: 2
+        };
+      }
       throw new Error(`Unexpected tool: ${name}`);
     },
     async updateApprovalPolicy(patch) {
@@ -101,6 +134,29 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/approval default auto_decide");
   await app.runCommand("/tools");
   await app.runCommand("/git");
+  await app.runCommand("/session");
+  await app.runCommand("/session list");
+  app.render({
+    id: "evt_todo",
+    type: "todo.updated",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 1,
+    timestamp: "2026-01-01T00:00:02.000Z",
+    source: "runtime",
+    payload: {
+      items: [
+        {
+          id: "todo_test",
+          title: "Check TUI commands",
+          status: "in_progress",
+          updatedAt: "2026-01-01T00:00:02.000Z"
+        }
+      ]
+    }
+  });
+  await app.runCommand("/todo");
+  await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
   await app.runCommand("/model profile frontend_design");
   await app.submitPrompt("设计一个前端界面");
@@ -117,16 +173,24 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Approval default mode set to auto_decide/);
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
   assert.match(text, /\[git\] main \(clean\)/);
+  assert.match(text, /Session: ses_tool/);
+  assert.match(text, /Sessions:/);
+  assert.match(text, /Todo:\n  in_progress Check TUI commands/);
+  assert.match(text, /Diff: 1 file\(s\), \+4\/-1/);
+  assert.match(text, /packages\/runloom-tui\/src\/app\/tui-app\.ts/);
   assert.match(text, /\[tests\] pnpm typecheck exit=0 duration=12ms/);
   assert.match(text, /tests ok/);
   assert.match(text, /Model profile set to frontend_design/);
   assert.match(text, /Model override set to kimi:kimi-design/);
-  assert.equal(submissions[0].profile, "frontend_design");
-  assert.equal(submissions[0].model, undefined);
-  assert.equal(submissions[1].model, "kimi:kimi-design");
-  assert.equal(submissions[1].profile, undefined);
+  assert.equal(submissions[0].input.profile, "frontend_design");
+  assert.equal(submissions[0].input.model, undefined);
+  assert.equal(submissions[0].options.sessionId, "ses_tool");
+  assert.equal(submissions[1].input.model, "kimi:kimi-design");
+  assert.equal(submissions[1].input.profile, undefined);
+  assert.equal(submissions[1].options.sessionId, "ses_tool");
   assert.deepEqual(toolCalls[0], { name: "git.status", input: {} });
-  assert.deepEqual(toolCalls[1], { name: "shell.verify", input: { command: "pnpm", args: ["typecheck"] } });
+  assert.deepEqual(toolCalls[1], { name: "git.diff", input: {} });
+  assert.deepEqual(toolCalls[2], { name: "shell.verify", input: { command: "pnpm", args: ["typecheck"] } });
 });
 
 class MemoryOutput extends Writable {

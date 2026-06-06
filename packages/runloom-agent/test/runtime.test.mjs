@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { createRunloomAgent, OpenAIResponsesProvider } from "../dist/index.js";
+
+const execFileAsync = promisify(execFile);
 
 test("approval policy can be updated", async () => {
   const agent = await createRunloomAgent({
@@ -416,6 +420,39 @@ test("built-in coding tools operate on real workspace data", async () => {
   await agent.close();
 });
 
+test("git diff tool reads a real workspace patch", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "runloom-git-diff-"));
+
+  try {
+    await execFileAsync("git", ["init"], { cwd: workspace, windowsHide: true });
+    await execFileAsync("git", ["config", "user.email", "runloom@example.test"], { cwd: workspace, windowsHide: true });
+    await execFileAsync("git", ["config", "user.name", "Runloom Test"], { cwd: workspace, windowsHide: true });
+    await writeFile(join(workspace, "sample.txt"), "alpha\nbeta\n");
+    await execFileAsync("git", ["add", "sample.txt"], { cwd: workspace, windowsHide: true });
+    await execFileAsync("git", ["commit", "-m", "initial"], { cwd: workspace, windowsHide: true });
+    await writeFile(join(workspace, "sample.txt"), "alpha\ngamma\n");
+
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace,
+      apiKey: ""
+    });
+
+    const result = await agent.executeTool("git.diff", {});
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.output.filesChanged[0], "sample.txt");
+    assert.equal(result.output.additions, 1);
+    assert.equal(result.output.deletions, 1);
+    assert.match(result.output.patch, /-beta/);
+    assert.match(result.output.patch, /\+gamma/);
+    await agent.close();
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("built-in tools can be listed for host adapters", async () => {
   const agent = await createRunloomAgent({
     provider: "openai-responses",
@@ -427,11 +464,14 @@ test("built-in tools can be listed for host adapters", async () => {
   const tools = await agent.listTools();
   const readTool = tools.find((tool) => tool.name === "fs.read");
   const shellTool = tools.find((tool) => tool.name === "shell.verify");
+  const diffTool = tools.find((tool) => tool.name === "git.diff");
 
   assert.ok(readTool);
   assert.equal(readTool.permissions[0], "filesystem.read");
   assert.ok(shellTool);
   assert.equal(shellTool.permissions[0], "shell");
+  assert.ok(diffTool);
+  assert.equal(diffTool.permissions[0], "filesystem.read");
   await agent.close();
 });
 

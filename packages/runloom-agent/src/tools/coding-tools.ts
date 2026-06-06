@@ -17,7 +17,8 @@ export function createBuiltInCodingTools(): ToolDefinition[] {
     createWriteFileTool(),
     createDiffTextTool(),
     createVerifyCommandTool(),
-    createGitStatusTool()
+    createGitStatusTool(),
+    createGitDiffTool()
   ];
 }
 
@@ -274,6 +275,50 @@ function createGitStatusTool(): ToolDefinition<Record<string, never>, GitStatusS
   };
 }
 
+function createGitDiffTool(): ToolDefinition<
+  { staged?: boolean; maxBytes?: number },
+  RunloomDiffSummary
+> {
+  return {
+    name: "git.diff",
+    description: "Read the current workspace git diff as a unified patch summary.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        staged: { type: "boolean" },
+        maxBytes: { type: "number" }
+      },
+      additionalProperties: false
+    },
+    permissions: ["filesystem.read"],
+    async execute(input, context) {
+      const modeArgs = input.staged ? ["--cached"] : ["HEAD"];
+      try {
+        const [{ stdout: numstat }, { stdout: patch }] = await Promise.all([
+          execFileAsync("git", ["diff", ...modeArgs, "--numstat", "--"], {
+            cwd: context.workspace,
+            windowsHide: true
+          }),
+          execFileAsync("git", ["diff", ...modeArgs, "--no-ext-diff", "--unified=3", "--"], {
+            cwd: context.workspace,
+            windowsHide: true,
+            maxBuffer: 1024 * 1024 * 20
+          })
+        ]);
+        const maxBytes = input.maxBytes ?? 120_000;
+        return summarizeGitDiff(numstat, patch, maxBytes);
+      } catch {
+        return {
+          filesChanged: [],
+          additions: 0,
+          deletions: 0,
+          patch: ""
+        };
+      }
+    }
+  };
+}
+
 async function walk(root: string, workspace: string, output: string[], maxEntries: number): Promise<void> {
   if (output.length >= maxEntries) {
     return;
@@ -330,4 +375,40 @@ function summarizePatch(patch: string, filePath: string): RunloomDiffSummary {
     deletions,
     patch
   };
+}
+
+function summarizeGitDiff(numstat: string, patch: string, maxBytes: number): RunloomDiffSummary {
+  let additions = 0;
+  let deletions = 0;
+  const filesChanged: string[] = [];
+
+  for (const line of numstat.split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+    const [added, deleted, filePath] = line.split("\t");
+    if (filePath) {
+      filesChanged.push(filePath);
+    }
+    additions += parseGitNumstatValue(added);
+    deletions += parseGitNumstatValue(deleted);
+  }
+
+  const truncatedPatch =
+    patch.length > maxBytes ? `${patch.slice(0, maxBytes)}\n...[truncated ${patch.length - maxBytes} bytes]` : patch;
+
+  return {
+    filesChanged,
+    additions,
+    deletions,
+    patch: truncatedPatch
+  };
+}
+
+function parseGitNumstatValue(value: string | undefined): number {
+  if (!value || value === "-") {
+    return 0;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

@@ -8,7 +8,10 @@ import type {
   PermissionScope,
   RunloomAgent,
   RunloomEvent,
+  RunloomSession,
+  RunloomTodoItem,
   ToolSummary,
+  ToolExecutionResult,
   Unsubscribe
 } from "runloom-agent";
 
@@ -37,6 +40,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private activeProfile?: string;
   private activeTaskType?: string;
   private activeLanguage?: string;
+  private activeRunId?: string;
+  private activeSessionId?: string;
+  private latestTodoItems: RunloomTodoItem[] = [];
 
   constructor(private readonly options: CreateRunloomTuiAppOptions) {}
 
@@ -94,6 +100,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       profile: this.activeProfile,
       taskType: this.activeTaskType,
       language: this.activeLanguage
+    }, {
+      sessionId: this.activeSessionId
     });
   }
 
@@ -114,6 +122,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     switch (event.type) {
       case "run.started":
+        this.activeRunId = event.runId;
+        this.activeSessionId = event.sessionId;
         output.write(`\n[run] started ${event.runId}\n`);
         break;
       case "coding.workspace.inspected":
@@ -123,6 +133,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         output.write(`[git] ${formatGitStatus(event.payload)}\n`);
         break;
       case "todo.updated":
+        if (!this.activeSessionId || event.sessionId === this.activeSessionId) {
+          this.latestTodoItems = (event.payload as { items?: RunloomTodoItem[] }).items ?? [];
+        }
         output.write(`[todo] ${formatTodo(event.payload)}\n`);
         break;
       case "response.output_text.delta":
@@ -183,6 +196,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /model profile <name>",
           "  /model clear",
           "  /tools         List registered coding tools",
+          "  /session       Show or switch sessions",
+          "  /todo          Show current todo state",
+          "  /diff          Show current git diff",
           "  /git           Show git status",
           "  /tests         Run verification command",
           "  /quit          Exit"
@@ -200,6 +216,21 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (command === "/tools") {
       const tools = await this.options.agent.listTools();
       output.write(formatTools(tools));
+      return;
+    }
+
+    if (command === "/session" || command.startsWith("/session ")) {
+      await this.handleSessionCommand(command);
+      return;
+    }
+
+    if (command === "/todo") {
+      output.write(formatTodoView(this.latestTodoItems));
+      return;
+    }
+
+    if (command === "/diff") {
+      await this.handleDiffCommand();
       return;
     }
 
@@ -228,7 +259,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
   private async handleGitCommand(): Promise<void> {
     const output = this.options.output ?? defaultOutput;
-    const result = await this.options.agent.executeTool("git.status", {});
+    const result = await this.options.agent.executeTool("git.status", {}, { sessionId: this.activeSessionId });
+    this.trackToolSession(result);
     if (result.status !== "completed") {
       output.write(formatToolExecutionState(result));
       return;
@@ -239,12 +271,66 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private async handleTestsCommand(command: string): Promise<void> {
     const output = this.options.output ?? defaultOutput;
     const verification = parseVerificationCommand(command);
-    const result = await this.options.agent.executeTool("shell.verify", verification);
+    const result = await this.options.agent.executeTool("shell.verify", verification, { sessionId: this.activeSessionId });
+    this.trackToolSession(result);
     if (result.status !== "completed") {
       output.write(formatToolExecutionState(result));
       return;
     }
     output.write(formatVerificationResult(result.output));
+  }
+
+  private async handleDiffCommand(): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const result = await this.options.agent.executeTool("git.diff", {}, { sessionId: this.activeSessionId });
+    this.trackToolSession(result);
+    if (result.status !== "completed") {
+      output.write(formatToolExecutionState(result));
+      return;
+    }
+    output.write(formatDiffSummary(result.output));
+  }
+
+  private async handleSessionCommand(command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const [, action, sessionId] = command.split(/\s+/);
+
+    if (!action) {
+      if (!this.activeSessionId) {
+        output.write("Session: (none yet)\n");
+        return;
+      }
+      const session = await this.options.agent.getSession(this.activeSessionId);
+      output.write(formatCurrentSession(session, this.activeRunId));
+      return;
+    }
+
+    if (action === "list") {
+      const sessions = await this.options.agent.listSessions();
+      output.write(formatSessions(sessions, this.activeSessionId));
+      return;
+    }
+
+    if (action === "switch") {
+      if (!sessionId) {
+        output.write("Missing session id for /session switch\n");
+        return;
+      }
+      const session = await this.options.agent.getSession(sessionId);
+      this.activeSessionId = session.id;
+      this.activeRunId = undefined;
+      this.latestTodoItems = [];
+      output.write(`Session switched to ${session.id}\n`);
+      return;
+    }
+
+    output.write(`Unknown /session action: ${action}\n`);
+    output.write(formatSessionCommandHelp());
+  }
+
+  private trackToolSession(result: ToolExecutionResult): void {
+    this.activeRunId = result.runId;
+    this.activeSessionId = result.sessionId;
   }
 
   private async handleApprovalCommand(command: string): Promise<void> {
@@ -358,6 +444,18 @@ function formatTodo(payload: unknown): string {
   return items.map((item) => `${item.status}: ${item.title}`).join("; ");
 }
 
+function formatTodoView(items: RunloomTodoItem[]): string {
+  if (items.length === 0) {
+    return "Todo: (none)\n";
+  }
+  const lines = ["Todo:"];
+  for (const item of items) {
+    const evidence = item.evidence?.length ? ` evidence=${item.evidence.join(",")}` : "";
+    lines.push(`  ${item.status} ${item.title}${evidence}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function formatErrorPayload(payload: unknown): string {
   if (typeof payload === "string") {
     return payload;
@@ -417,6 +515,37 @@ function formatTools(tools: ToolSummary[]): string {
   return `${lines.join("\n")}\n`;
 }
 
+function formatCurrentSession(session: RunloomSession, activeRunId?: string): string {
+  return [
+    `Session: ${session.id}`,
+    `  workspace: ${session.workspace}`,
+    `  createdAt: ${session.createdAt}`,
+    `  updatedAt: ${session.updatedAt}`,
+    `  activeRun: ${activeRunId ?? "(none)"}`
+  ].join("\n") + "\n";
+}
+
+function formatSessions(sessions: RunloomSession[], activeSessionId?: string): string {
+  if (sessions.length === 0) {
+    return "Sessions: (none)\n";
+  }
+  const lines = ["Sessions:"];
+  for (const session of sessions) {
+    const marker = session.id === activeSessionId ? "*" : " ";
+    lines.push(`${marker} ${session.id} updated=${session.updatedAt} workspace=${session.workspace}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatSessionCommandHelp(): string {
+  return [
+    "Usage:",
+    "  /session",
+    "  /session list",
+    "  /session switch <session-id>"
+  ].join("\n") + "\n";
+}
+
 function formatToolExecutionState(result: { toolName: string; status: string; error?: string; approvalId?: string }): string {
   if (result.status === "waiting_approval") {
     return `[tool] ${result.toolName} waiting for approval ${result.approvalId ?? ""}\n`;
@@ -434,6 +563,22 @@ function formatVerificationResult(payload: unknown): string {
   }
   if (result.stderr?.trim()) {
     lines.push(result.stderr.trim());
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatDiffSummary(payload: unknown): string {
+  const diff = payload as { filesChanged?: string[]; additions?: number; deletions?: number; patch?: string };
+  const files = diff.filesChanged ?? [];
+  if (files.length === 0 && !diff.patch?.trim()) {
+    return "Diff: no tracked changes\n";
+  }
+  const lines = [`Diff: ${files.length} file(s), +${diff.additions ?? 0}/-${diff.deletions ?? 0}`];
+  if (files.length) {
+    lines.push(`Files: ${files.join(", ")}`);
+  }
+  if (diff.patch?.trim()) {
+    lines.push(diff.patch.trimEnd());
   }
   return `${lines.join("\n")}\n`;
 }

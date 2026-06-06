@@ -59,7 +59,7 @@
 ## Phase 1.5：专业编程开发闭环
 
 - [ ] 文件工具：list/read/search/write/patch，全部受 workspace guard 和 approval policy 控制。
-- [ ] Diff 工具：生成、展示和记录 unified diff。
+- [~] Diff 工具：已实现 `diff.text` 和 `git.diff` unified diff 摘要；仍需持久化 diff record 与宿主 diff adapter 展示。
 - [x] Shell 验证工具：运行用户或项目配置的 typecheck/test/build 命令。
 - [x] Git 感知：读取 `git status`、当前分支、未提交 diff 和冲突风险。
 - [ ] 代码修改计划：高风险修改前生成 edit plan，说明目标文件、风险和验证命令。
@@ -128,10 +128,10 @@
 - [x] CLI bin：`runloom`。
 - [x] 嵌入式 TUI API：`createRunloomTuiApp`。
 - [ ] transcript 区、输入区、todo 区、tool activity 区、status 区。
-- [ ] coding activity 展示：文件读取、patch、diff、测试命令、git 状态。
+- [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态和 todo；仍需完整 activity panel 与事件回放。
 - [ ] approval 弹窗。
 - [ ] `/permissions` 权限审批设置面板。
-- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/git`、`/tests`、`/quit`；仍需 `/session`、`/todo`、`/diff`、`/review`、`/skills`、`/mcp`、`/stop`、`/resume`。
+- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/git`、`/tests`、`/quit`；仍需 `/review`、`/skills`、`/mcp`、`/stop`、`/resume`。
 - [ ] 事件回放和滚动。
 
 验收标准：

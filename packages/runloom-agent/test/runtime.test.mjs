@@ -298,4 +298,21 @@ test("shell verification is governed by approval policy", async () => {
   assert.equal(verified.output.exitCode, 0);
   assert.match(verified.output.stdout.trim(), /^v\d+\./);
   await fullAccessAgent.close();
+
+  const autoDecideAgent = await createRunloomAgent({
+    provider: "openai-responses",
+    model: "gpt-4.1",
+    workspace: process.cwd(),
+    apiKey: "",
+    approvalPolicy: {
+      scopes: {
+        shell: "auto_decide"
+      }
+    }
+  });
+
+  const autoDecision = await autoDecideAgent.executeTool("shell.verify", { command: "node", args: ["--version"] });
+  assert.equal(autoDecision.status, "waiting_approval");
+  assert.ok(autoDecision.approvalId);
+  await autoDecideAgent.close();
 });

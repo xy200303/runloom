@@ -96,13 +96,14 @@ export class ToolExecutor {
   private checkApproval(tool: ToolDefinition, input: unknown, runId: string): ApprovalRequest | undefined {
     for (const scope of tool.permissions) {
       const mode = getApprovalMode(this.options.getApprovalPolicy(), scope);
-      if (mode === "ask") {
+      const risk = riskForScope(scope);
+      if (requiresApproval(mode, risk)) {
         return {
           id: `approval_${randomUUID()}`,
           runId,
           scope,
           action: `tool:${tool.name}`,
-          risk: scope === "shell" || scope.includes("write") || scope.includes("delete") ? "high" : "medium",
+          risk,
           mode,
           summary: `Runloom wants to execute ${tool.name}.`,
           details: {
@@ -114,6 +115,38 @@ export class ToolExecutor {
     }
     return undefined;
   }
+}
+
+function requiresApproval(mode: ApprovalRequest["mode"], risk: ApprovalRequest["risk"]): boolean {
+  if (mode === "full_access") {
+    return false;
+  }
+  if (mode === "ask") {
+    return true;
+  }
+  return risk === "high" || risk === "critical";
+}
+
+function riskForScope(scope: ApprovalRequest["scope"]): ApprovalRequest["risk"] {
+  if (scope === "filesystem.read") {
+    return "low";
+  }
+  if (scope === "filesystem.delete" || scope === "identity.write" || scope === "evolution.apply" || scope === "npm.publish") {
+    return "critical";
+  }
+  if (
+    scope === "filesystem.write" ||
+    scope === "shell" ||
+    scope === "browser" ||
+    scope === "gui" ||
+    scope === "external_agents" ||
+    scope === "a2a.delegation" ||
+    scope === "tools.register" ||
+    scope === "skills.register"
+  ) {
+    return "high";
+  }
+  return "medium";
 }
 
 function summarize(value: unknown): unknown {

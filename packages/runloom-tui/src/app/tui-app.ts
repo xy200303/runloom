@@ -455,9 +455,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     const result = await this.options.agent.executeTool("git.status", {}, { sessionId: this.activeSessionId });
     this.trackToolSession(result);
     if (result.status !== "completed") {
+      this.recordToolCommandActivity(result, formatToolExecutionState(result).trim(), "tools");
       output.write(formatToolExecutionState(result));
       return;
     }
+    this.recordToolCommandActivity(result, `git ${formatGitStatus(result.output)}`, "coding");
     output.write(`[git] ${formatGitStatus(result.output)}\n`);
   }
 
@@ -467,9 +469,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     const result = await this.options.agent.executeTool("shell.verify", verification, { sessionId: this.activeSessionId });
     this.trackToolSession(result);
     if (result.status !== "completed") {
+      this.recordToolCommandActivity(result, formatToolExecutionState(result).trim(), "tools");
       output.write(formatToolExecutionState(result));
       return;
     }
+    this.recordToolCommandActivity(result, `tests ${formatVerificationActivity(result.output)}`, "coding");
     output.write(formatVerificationResult(result.output));
   }
 
@@ -478,9 +482,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     const result = await this.options.agent.executeTool("git.diff", {}, { sessionId: this.activeSessionId });
     this.trackToolSession(result);
     if (result.status !== "completed") {
+      this.recordToolCommandActivity(result, formatToolExecutionState(result).trim(), "tools");
       output.write(formatToolExecutionState(result));
       return;
     }
+    this.recordToolCommandActivity(result, `diff ${formatDiffActivity(result.output)}`, "coding");
     output.write(formatDiffSummary(result.output));
   }
 
@@ -839,10 +845,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   }
 
   private formatActivity(category?: ActivityCategory): string {
+    const lines = this.activityLines(category);
+    const scrollOffset = clamp(this.viewState.activityScrollOffset, 0, Math.max(0, lines.length - DEFAULT_PANEL_LINES));
     return formatActivityView(
-      this.activityLines(category),
+      lines,
       DEFAULT_PANEL_LINES,
-      this.viewState.activityScrollOffset,
+      scrollOffset,
       category
     );
   }
@@ -1313,8 +1321,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (!line.trim()) {
       return;
     }
-    pushCapped(this.viewState.activity, line);
-    pushCapped(this.viewState.activityRecords, {
+    this.pushActivityRecord({
       category,
       line,
       eventType: event?.type,
@@ -1324,6 +1331,37 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       timestamp: event?.timestamp,
       payload: event?.payload
     });
+  }
+
+  private recordToolCommandActivity(
+    result: ToolExecutionResult,
+    line: string,
+    category: ActivityCategory
+  ): void {
+    this.pushActivityRecord({
+      category,
+      line,
+      eventType: `tool.${result.toolName}`,
+      runId: result.runId,
+      sessionId: result.sessionId,
+      source: "tui",
+      payload: {
+        toolName: result.toolName,
+        status: result.status,
+        output: result.output,
+        error: result.error,
+        approvalId: result.approvalId,
+        durationMs: result.durationMs
+      }
+    });
+  }
+
+  private pushActivityRecord(record: TuiActivityRecord): void {
+    if (!record.line.trim()) {
+      return;
+    }
+    pushCapped(this.viewState.activity, record.line);
+    pushCapped(this.viewState.activityRecords, record);
   }
 }
 
@@ -1745,6 +1783,11 @@ function formatVerificationResult(payload: unknown): string {
   return `${lines.join("\n")}\n`;
 }
 
+function formatVerificationActivity(payload: unknown): string {
+  const result = payload as { command?: string; exitCode?: number; durationMs?: number };
+  return `${result.command ?? "verification"} exit=${result.exitCode ?? "unknown"} duration=${result.durationMs ?? 0}ms`;
+}
+
 function formatDiffSummary(payload: unknown): string {
   const diff = payload as { filesChanged?: string[]; additions?: number; deletions?: number; patch?: string };
   const files = diff.filesChanged ?? [];
@@ -1759,6 +1802,15 @@ function formatDiffSummary(payload: unknown): string {
     lines.push(diff.patch.trimEnd());
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatDiffActivity(payload: unknown): string {
+  const diff = payload as { filesChanged?: string[]; additions?: number; deletions?: number; patch?: string };
+  const files = diff.filesChanged ?? [];
+  if (files.length === 0 && !diff.patch?.trim()) {
+    return "no tracked changes";
+  }
+  return `${files.length} file(s), +${diff.additions ?? 0}/-${diff.deletions ?? 0}`;
 }
 
 function formatReviewFindings(payload: unknown): string {

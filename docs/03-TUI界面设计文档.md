@@ -247,7 +247,7 @@ TUI 需要把编程开发活动作为一等状态展示：
 - Git 状态：当前分支、dirty files、用户未提交改动风险。
 - Review：发现的问题、严重程度、文件位置和建议验证方式。
 
-首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp` 和 `/activity view ...`，所有过滤与详情视图仍只消费 `RunloomEvent` 派生出的 TUI view state。
+首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp` 和 `/activity view ...`。`/git`、`/diff`、`/tests` 这类由用户在 TUI 主动触发的 public tool API 结果也会记录到 `coding` activity，所有过滤与详情视图仍只消费 TUI view state。
 
 原则：
 

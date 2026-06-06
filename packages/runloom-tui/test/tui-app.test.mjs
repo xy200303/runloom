@@ -250,7 +250,7 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /\[git\] main \(clean\)/);
   assert.match(text, /Session: ses_tool/);
   assert.match(text, /Sessions:/);
-  assert.match(text, /Todo:\n  in_progress Check TUI commands/);
+  assert.match(text, /Todo:\n {2}in_progress Check TUI commands/);
   assert.match(text, /Diff: 1 file\(s\), \+4\/-1/);
   assert.match(text, /packages\/runloom-tui\/src\/app\/tui-app\.ts/);
   assert.match(text, /\[tests\] pnpm typecheck exit=0 duration=12ms/);

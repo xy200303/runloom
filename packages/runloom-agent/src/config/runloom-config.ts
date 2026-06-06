@@ -107,7 +107,7 @@ function readConfigFile(path: string): ConfigFile {
     parsed = JSON.parse(raw) as unknown;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Invalid Runloom config JSON at ${path}: ${message}`);
+    throw new Error(`Invalid Runloom config JSON at ${path}: ${message}`, { cause: error });
   }
 
   assertNoSecretKeys(parsed, path);

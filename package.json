@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "build": "tsc -b packages/runloom-agent packages/runloom-tui",
+    "lint": "eslint .",
     "typecheck": "tsc -b packages/runloom-agent packages/runloom-tui --pretty false",
     "test": "pnpm test:unit && pnpm build && node --test packages/runloom-agent/test/runtime.test.mjs packages/runloom-tui/test/tui-app.test.mjs",
     "test:vitest": "pnpm build && vitest run --config vitest.config.ts",
@@ -21,8 +22,12 @@
     "pack:dry": "npm pack --dry-run --workspace runloom-agent && npm pack --dry-run --workspace runloom-tui"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.15.3",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.60.1",
     "vitest": "^4.1.8"
   }
 }

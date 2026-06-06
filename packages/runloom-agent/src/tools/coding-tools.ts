@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { GitStatusSummary, RunloomDiffSummary, ToolDefinition, VerificationResult } from "../types.js";
 import { resolveWorkspacePath } from "./path-guard.js";

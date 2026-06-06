@@ -412,6 +412,37 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/transcript");
   await app.runCommand("/activity");
   await app.runCommand("/view");
+  for (let index = 0; index < 25; index += 1) {
+    app.render({
+      id: `evt_scroll_delta_${index}`,
+      type: "response.output_text.delta",
+      runId: "run_tool",
+      sessionId: "ses_tool",
+      sequence: 10 + index * 2,
+      timestamp: "2026-01-01T00:00:04.000Z",
+      source: "model",
+      payload: {
+        delta: `Scroll response ${index}.`
+      }
+    });
+    app.render({
+      id: `evt_scroll_completed_${index}`,
+      type: "response.completed",
+      runId: "run_tool",
+      sessionId: "ses_tool",
+      sequence: 11 + index * 2,
+      timestamp: "2026-01-01T00:00:04.500Z",
+      source: "model",
+      payload: {
+        finishReason: "stop"
+      }
+    });
+  }
+  await app.runCommand("/focus transcript");
+  await app.runCommand("/scroll top");
+  await app.runCommand("/scroll bottom");
+  await app.runCommand("/focus activity");
+  await app.runCommand("/scroll top");
   await app.runCommand("/todo");
   await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
@@ -450,6 +481,13 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Transcript:\n {2}user: Check TUI commands/);
   assert.match(text, /assistant: Working on it\./);
   assert.match(text, /Activity:\n(?:.*\n)* {2}model completed/);
+  assert.match(text, /Focus set to transcript/);
+  assert.match(text, /Transcript: showing 1-20 of 27 offset=7/);
+  assert.match(text, /assistant: Scroll response 0\./);
+  assert.match(text, /Transcript: showing 8-27 of 27/);
+  assert.match(text, /assistant: Scroll response 24\./);
+  assert.match(text, /Focus set to activity/);
+  assert.match(text, /Activity: showing 1-20 of 30 offset=10/);
   assert.match(text, /Todo:\n {2}in_progress Check TUI commands/);
   assert.match(text, /\[review\] 1 finding\(s\)/);
   assert.match(text, /Files: packages\/runloom-tui\/src\/app\/tui-app\.ts/);

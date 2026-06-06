@@ -127,12 +127,12 @@
 
 - [x] CLI bin：`runloom`。
 - [x] 嵌入式 TUI API：`createRunloomTuiApp`。
-- [~] transcript 区、输入区、todo 区、tool activity 区、status 区：已建立命令式 view-state panel；仍需完整全屏布局和焦点切换。
+- [~] transcript 区、输入区、todo 区、tool activity 区、status 区：已建立命令式 view-state panel、焦点切换和面板滚动；仍需完整全屏布局。
 - [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态、todo 和 activity panel；仍需完整 activity panel 交互。
 - [~] approval 弹窗：已实现 `/approvals`、`/approve`、`/deny` 命令式处理；仍需弹窗/快捷键 UI。
 - [~] `/permissions` 权限审批设置面板：已实现命令式读取和修改；仍需面板化展示。
-- [x] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/approvals`、`/approve`、`/deny`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/quit`。
-- [~] 事件回放和滚动：已支持 `/replay` 从 stored events 重建面板；仍需键盘滚动。
+- [x] 基础命令：已实现 `/help`、`/status`、`/view`、`/transcript`、`/activity`、`/focus`、`/scroll`、`/replay`、`/permissions`、`/approval`、`/approvals`、`/approve`、`/deny`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/quit`。
+- [~] 事件回放和滚动：已支持 `/replay` 从 stored events 重建面板，并支持 `/focus`、`/scroll` 命令式面板滚动；仍需键盘快捷键滚动。
 
 验收标准：
 

@@ -20,6 +20,20 @@ import type {
 } from "runloom-agent";
 
 const MAX_VIEW_LINES = 200;
+const DEFAULT_PANEL_LINES = 20;
+const COMPOSITE_PANEL_LINES = 8;
+
+type TuiPanel = "status" | "transcript" | "todo" | "activity";
+type ScrollAction = "up" | "down" | "top" | "bottom";
+
+interface TuiViewContext {
+  activeSessionId?: string;
+  activeRunId?: string;
+  activeModel?: string;
+  activeProfile?: string;
+  activeTaskType?: string;
+  activeLanguage?: string;
+}
 
 export interface CreateRunloomTuiAppOptions {
   agent: RunloomAgent;
@@ -44,6 +58,10 @@ interface TuiViewState {
   activity: string[];
   todoItems: RunloomTodoItem[];
   runStatus: "idle" | string;
+  focus: TuiPanel;
+  transcriptScrollOffset: number;
+  activityScrollOffset: number;
+  todoScrollOffset: number;
   latestModel?: {
     providerId?: string;
     model?: string;
@@ -66,7 +84,11 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     transcript: [],
     activity: [],
     todoItems: [],
-    runStatus: "idle"
+    runStatus: "idle",
+    focus: "transcript",
+    transcriptScrollOffset: 0,
+    activityScrollOffset: 0,
+    todoScrollOffset: 0
   };
 
   constructor(private readonly options: CreateRunloomTuiAppOptions) {}
@@ -226,6 +248,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /view          Show status, todo, activity, and transcript panels",
           "  /transcript    Show recent transcript",
           "  /activity      Show recent activity",
+          "  /focus <panel> Focus status, transcript, todo, or activity",
+          "  /scroll <dir>  Scroll focused panel up, down, top, or bottom",
           "  /replay        Rebuild panels from stored events",
           "  /permissions   Show approval policy",
           "  /approval      Show or update approval policy",
@@ -275,13 +299,23 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
-    if (command === "/transcript") {
-      output.write(formatTranscriptView(this.viewState.transcript));
+    if (command === "/transcript" || command.startsWith("/transcript ")) {
+      await this.handlePanelCommand("transcript", command);
       return;
     }
 
-    if (command === "/activity") {
-      output.write(formatActivityView(this.viewState.activity));
+    if (command === "/activity" || command.startsWith("/activity ")) {
+      await this.handlePanelCommand("activity", command);
+      return;
+    }
+
+    if (command === "/focus" || command.startsWith("/focus ")) {
+      this.handleFocusCommand(command);
+      return;
+    }
+
+    if (command === "/scroll" || command.startsWith("/scroll ")) {
+      this.handleScrollCommand(command);
       return;
     }
 
@@ -324,8 +358,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
-    if (command === "/todo") {
-      output.write(formatTodoView(this.viewState.todoItems));
+    if (command === "/todo" || command.startsWith("/todo ")) {
+      await this.handlePanelCommand("todo", command);
       return;
     }
 
@@ -449,6 +483,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       this.activeRunId = undefined;
       this.viewState.todoItems = [];
       this.viewState.runStatus = "idle";
+      this.resetScrollOffsets();
       output.write(`Session switched to ${session.id}\n`);
       return;
     }
@@ -516,6 +551,135 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       activeTaskType: this.activeTaskType,
       activeLanguage: this.activeLanguage
     }));
+  }
+
+  private async handlePanelCommand(panel: TuiPanel, command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const [, action, amountText] = command.split(/\s+/);
+    if (action && isScrollAction(action)) {
+      this.viewState.focus = panel;
+      this.scrollPanel(panel, action, parseScrollAmount(amountText));
+    }
+    output.write(this.formatPanel(panel));
+  }
+
+  private handleFocusCommand(command: string): void {
+    const output = this.options.output ?? defaultOutput;
+    const [, panelText] = command.split(/\s+/);
+    if (!panelText) {
+      output.write(`Focus: ${this.viewState.focus}\n`);
+      output.write(formatFocusCommandHelp());
+      return;
+    }
+
+    const panel = parsePanel(panelText);
+    if (!panel) {
+      output.write(`Invalid panel: ${panelText}\n`);
+      output.write(formatFocusCommandHelp());
+      return;
+    }
+
+    this.viewState.focus = panel;
+    output.write(`Focus set to ${panel}\n`);
+    output.write(this.formatPanel(panel));
+  }
+
+  private handleScrollCommand(command: string): void {
+    const output = this.options.output ?? defaultOutput;
+    const [, actionText, amountText] = command.split(/\s+/);
+    const action = actionText ?? "down";
+    if (!isScrollAction(action)) {
+      output.write(`Invalid scroll direction: ${action}\n`);
+      output.write(formatScrollCommandHelp());
+      return;
+    }
+
+    this.scrollPanel(this.viewState.focus, action, parseScrollAmount(amountText));
+    output.write(this.formatPanel(this.viewState.focus));
+  }
+
+  private scrollPanel(panel: TuiPanel, action: ScrollAction, amount: number): void {
+    const maxOffset = this.maxScrollOffset(panel);
+    const current = this.getScrollOffset(panel);
+    let next: number;
+
+    if (action === "up") {
+      next = current + amount;
+    } else if (action === "down") {
+      next = current - amount;
+    } else if (action === "top") {
+      next = maxOffset;
+    } else {
+      next = 0;
+    }
+
+    this.setScrollOffset(panel, clamp(next, 0, maxOffset));
+  }
+
+  private maxScrollOffset(panel: TuiPanel): number {
+    if (panel === "transcript") {
+      return Math.max(0, this.viewState.transcript.length - DEFAULT_PANEL_LINES);
+    }
+    if (panel === "activity") {
+      return Math.max(0, this.viewState.activity.length - DEFAULT_PANEL_LINES);
+    }
+    if (panel === "todo") {
+      return Math.max(0, this.viewState.todoItems.length - DEFAULT_PANEL_LINES);
+    }
+    return 0;
+  }
+
+  private getScrollOffset(panel: TuiPanel): number {
+    if (panel === "transcript") {
+      return this.viewState.transcriptScrollOffset;
+    }
+    if (panel === "activity") {
+      return this.viewState.activityScrollOffset;
+    }
+    if (panel === "todo") {
+      return this.viewState.todoScrollOffset;
+    }
+    return 0;
+  }
+
+  private setScrollOffset(panel: TuiPanel, offset: number): void {
+    if (panel === "transcript") {
+      this.viewState.transcriptScrollOffset = offset;
+    } else if (panel === "activity") {
+      this.viewState.activityScrollOffset = offset;
+    } else if (panel === "todo") {
+      this.viewState.todoScrollOffset = offset;
+    }
+  }
+
+  private resetScrollOffsets(): void {
+    this.viewState.transcriptScrollOffset = 0;
+    this.viewState.activityScrollOffset = 0;
+    this.viewState.todoScrollOffset = 0;
+  }
+
+  private formatPanel(panel: TuiPanel): string {
+    if (panel === "status") {
+      return formatStatusView(this.viewState, this.viewContext());
+    }
+    if (panel === "todo") {
+      return formatTodoView(this.viewState.todoItems, DEFAULT_PANEL_LINES, this.viewState.todoScrollOffset);
+    }
+    if (panel === "activity") {
+      return formatActivityView(this.viewState.activity, DEFAULT_PANEL_LINES, this.viewState.activityScrollOffset);
+    }
+    return formatTranscriptView(this.viewState.transcript, DEFAULT_PANEL_LINES, this.viewState.transcriptScrollOffset);
+  }
+
+  private viewContext(): TuiViewContext {
+    return {
+      activeSessionId: this.activeSessionId,
+      activeRunId: this.activeRunId,
+      activeModel: this.activeModel,
+      activeProfile: this.activeProfile,
+      activeTaskType: this.activeTaskType,
+      activeLanguage: this.activeLanguage
+    };
   }
 
   private trackToolSession(result: ToolExecutionResult): void {
@@ -740,6 +904,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     this.viewState.activity = [];
     this.viewState.todoItems = [];
     this.viewState.runStatus = "idle";
+    this.viewState.focus = "transcript";
+    this.resetScrollOffsets();
     this.viewState.latestModel = undefined;
     this.activeRunId = undefined;
     this.assistantBuffer = "";
@@ -785,34 +951,26 @@ function formatTodo(payload: unknown): string {
   return items.map((item) => `${item.status}: ${item.title}`).join("; ");
 }
 
-function formatTodoView(items: RunloomTodoItem[]): string {
+function formatTodoView(items: RunloomTodoItem[], limit = DEFAULT_PANEL_LINES, scrollOffset = 0): string {
   if (items.length === 0) {
     return "Todo: (none)\n";
   }
-  const lines = ["Todo:"];
-  for (const item of items) {
+  const visibleItems = visibleSlice(items, limit, scrollOffset);
+  const lines = [formatPanelHeader("Todo", items.length, visibleItems.start, visibleItems.items.length, scrollOffset)];
+  for (const item of visibleItems.items) {
     const evidence = item.evidence?.length ? ` evidence=${item.evidence.join(",")}` : "";
     lines.push(`  ${item.status} ${item.title}${evidence}`);
   }
   return `${lines.join("\n")}\n`;
 }
 
-function formatStatusView(
-  state: TuiViewState,
-  context: {
-    activeSessionId?: string;
-    activeRunId?: string;
-    activeModel?: string;
-    activeProfile?: string;
-    activeTaskType?: string;
-    activeLanguage?: string;
-  }
-): string {
+function formatStatusView(state: TuiViewState, context: TuiViewContext): string {
   const latestActivity = state.activity.at(-1) ?? "(none)";
   return [
     "Status:",
     `  session: ${context.activeSessionId ?? "(none)"}`,
     `  run: ${context.activeRunId ?? "(none)"} status=${state.runStatus}`,
+    `  focus: ${state.focus}`,
     `  model: ${formatStatusModel(state, context)}`,
     `  taskType: ${context.activeTaskType ?? "(auto)"}`,
     `  language: ${context.activeLanguage ?? "(auto)"}`,
@@ -821,46 +979,36 @@ function formatStatusView(
   ].join("\n") + "\n";
 }
 
-function formatCompositeView(
-  state: TuiViewState,
-  context: {
-    activeSessionId?: string;
-    activeRunId?: string;
-    activeModel?: string;
-    activeProfile?: string;
-    activeTaskType?: string;
-    activeLanguage?: string;
-  }
-): string {
+function formatCompositeView(state: TuiViewState, context: TuiViewContext): string {
   return [
     formatStatusView(state, context).trimEnd(),
-    formatTodoView(state.todoItems).trimEnd(),
-    formatActivityView(state.activity, 8).trimEnd(),
-    formatTranscriptView(state.transcript, 8).trimEnd()
+    formatTodoView(state.todoItems, COMPOSITE_PANEL_LINES, state.todoScrollOffset).trimEnd(),
+    formatActivityView(state.activity, COMPOSITE_PANEL_LINES, state.activityScrollOffset).trimEnd(),
+    formatTranscriptView(state.transcript, COMPOSITE_PANEL_LINES, state.transcriptScrollOffset).trimEnd()
   ].join("\n") + "\n";
 }
 
-function formatTranscriptView(lines: string[], limit = 20): string {
+function formatTranscriptView(lines: string[], limit = DEFAULT_PANEL_LINES, scrollOffset = 0): string {
   if (lines.length === 0) {
     return "Transcript: (empty)\n";
   }
-  return `Transcript:\n${lines.slice(-limit).map((line) => `  ${line}`).join("\n")}\n`;
+  const visibleLines = visibleSlice(lines, limit, scrollOffset);
+  return `${formatPanelHeader("Transcript", lines.length, visibleLines.start, visibleLines.items.length, scrollOffset)}\n${visibleLines.items
+    .map((line) => `  ${line}`)
+    .join("\n")}\n`;
 }
 
-function formatActivityView(lines: string[], limit = 20): string {
+function formatActivityView(lines: string[], limit = DEFAULT_PANEL_LINES, scrollOffset = 0): string {
   if (lines.length === 0) {
     return "Activity: (none)\n";
   }
-  return `Activity:\n${lines.slice(-limit).map((line) => `  ${line}`).join("\n")}\n`;
+  const visibleLines = visibleSlice(lines, limit, scrollOffset);
+  return `${formatPanelHeader("Activity", lines.length, visibleLines.start, visibleLines.items.length, scrollOffset)}\n${visibleLines.items
+    .map((line) => `  ${line}`)
+    .join("\n")}\n`;
 }
 
-function formatStatusModel(
-  state: TuiViewState,
-  context: {
-    activeModel?: string;
-    activeProfile?: string;
-  }
-): string {
+function formatStatusModel(state: TuiViewState, context: Pick<TuiViewContext, "activeModel" | "activeProfile">): string {
   if (context.activeModel) {
     return `${context.activeModel} override`;
   }
@@ -1209,6 +1357,59 @@ function formatScopeList(): string {
   return `Scopes: ${PERMISSION_SCOPES.join(", ")}\n`;
 }
 
+function parsePanel(value: string): TuiPanel | undefined {
+  if (value === "status" || value === "transcript" || value === "todo" || value === "activity") {
+    return value;
+  }
+  return undefined;
+}
+
+function isScrollAction(value: string): value is ScrollAction {
+  return value === "up" || value === "down" || value === "top" || value === "bottom";
+}
+
+function parseScrollAmount(value: string | undefined): number {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return DEFAULT_PANEL_LINES;
+}
+
+function formatFocusCommandHelp(): string {
+  return "Usage: /focus <status|transcript|todo|activity>\n";
+}
+
+function formatScrollCommandHelp(): string {
+  return "Usage: /scroll <up|down|top|bottom> [lines]\n";
+}
+
+function visibleSlice<TItem>(
+  items: TItem[],
+  limit: number,
+  scrollOffset: number
+): { items: TItem[]; start: number; end: number } {
+  const safeLimit = Math.max(1, limit);
+  const safeOffset = clamp(scrollOffset, 0, Math.max(0, items.length - safeLimit));
+  const end = Math.max(0, items.length - safeOffset);
+  const start = Math.max(0, end - safeLimit);
+  return {
+    items: items.slice(start, end),
+    start,
+    end
+  };
+}
+
+function formatPanelHeader(name: string, total: number, start: number, count: number, scrollOffset: number): string {
+  if (total <= count && scrollOffset === 0) {
+    return `${name}:`;
+  }
+  const first = count > 0 ? start + 1 : 0;
+  const last = start + count;
+  const offset = scrollOffset > 0 ? ` offset=${scrollOffset}` : "";
+  return `${name}: showing ${first}-${last} of ${total}${offset}`;
+}
+
 function pushCapped(lines: string[], line: string): void {
   lines.push(line);
   if (lines.length > MAX_VIEW_LINES) {
@@ -1222,4 +1423,8 @@ function truncateText(value: string, maxLength = 300): string {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }

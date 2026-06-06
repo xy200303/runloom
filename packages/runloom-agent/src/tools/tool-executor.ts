@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { getApprovalMode } from "../approvals/policy.js";
+import { errorToLogDetails, emitLog } from "../observability/logger.js";
 import { redactValue } from "../security/redaction.js";
 import type {
   ApprovalPolicyConfig,
   ApprovalRequest,
   RunloomEvent,
+  RunloomLogger,
   ToolContext,
   ToolDefinition,
   ToolExecutionResult
@@ -15,6 +17,7 @@ export interface ToolExecutorOptions {
   getApprovalPolicy(): ApprovalPolicyConfig;
   saveApproval(request: ApprovalRequest): void;
   emit(type: string, source: RunloomEvent["source"], runId: string, sessionId: string, payload: unknown): void;
+  logger?: RunloomLogger;
 }
 
 export class ToolExecutor {
@@ -41,11 +44,37 @@ export class ToolExecutor {
       inputSummary: summarize(safeInput),
       permissions: tool.permissions
     });
+    this.log(
+      {
+        level: "debug",
+        code: "tool.call.requested",
+        message: `Tool call requested: ${tool.name}`,
+        runId,
+        sessionId,
+        details: {
+          toolName: tool.name,
+          inputSummary: summarize(safeInput),
+          permissions: tool.permissions
+        }
+      },
+      fullContext.workspace
+    );
 
     const approval = this.checkApproval(tool, safeInput, runId, sessionId);
     if (approval) {
       this.options.saveApproval(approval);
       this.options.emit("approval.requested", "approval", runId, sessionId, approval);
+      this.log(
+        {
+          level: "warn",
+          code: "approval.requested",
+          message: `Approval requested for ${tool.name}.`,
+          runId,
+          sessionId,
+          details: approval
+        },
+        fullContext.workspace
+      );
       return {
         toolName: tool.name,
         runId,
@@ -69,6 +98,21 @@ export class ToolExecutor {
         outputSummary: summarize(safeOutput),
         durationMs
       });
+      this.log(
+        {
+          level: "info",
+          code: "tool.call.completed",
+          message: `Tool call completed: ${tool.name}`,
+          runId,
+          sessionId,
+          details: {
+            toolName: tool.name,
+            outputSummary: summarize(safeOutput),
+            durationMs
+          }
+        },
+        fullContext.workspace
+      );
       return {
         toolName: tool.name,
         runId,
@@ -87,6 +131,22 @@ export class ToolExecutor {
         error: message,
         durationMs
       });
+      this.log(
+        {
+          level: "error",
+          code: "tool.call.failed",
+          message: `Tool call failed: ${tool.name}`,
+          runId,
+          sessionId,
+          details: {
+            toolName: tool.name,
+            error: message,
+            errorDetails: errorToLogDetails(error),
+            durationMs
+          }
+        },
+        fullContext.workspace
+      );
       return {
         toolName: tool.name,
         runId,
@@ -120,6 +180,10 @@ export class ToolExecutor {
       }
     }
     return undefined;
+  }
+
+  private log(input: Parameters<typeof emitLog>[1], workspace: string): void {
+    emitLog(this.options.logger, { source: "tool", ...input }, workspace);
   }
 }
 

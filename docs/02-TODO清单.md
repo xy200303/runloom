@@ -46,7 +46,7 @@
 - [x] 实现任务画像模型路由：前端设计、Go 开发、原型设计、代码审查和测试修复可以命中不同模型。
 - [x] 产生 `model.selection.resolved` 事件，记录 provider、model、命中规则和选择原因。
 - [x] 实现 workspace path guard 和 redaction 初版。
-- [ ] 实现错误类型和结构化日志接口。
+- [x] 实现错误类型和结构化日志接口。
 - [x] 实现 coding task 基础上下文：workspace 摘要、package 信息、git 状态和用户未提交变更提示。
 - [x] 预留横向扩展接口：workspace、terminal、diff、approval、diagnostics host adapters。
 

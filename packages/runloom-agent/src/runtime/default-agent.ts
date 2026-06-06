@@ -4,7 +4,9 @@ import { FileApprovalPolicyStore } from "../approvals/file-policy-store.js";
 import { applyApprovalPolicyPatch, createDefaultApprovalPolicy } from "../approvals/policy.js";
 import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-summary.js";
 import { loadRunloomConfig, selectModel } from "../config/runloom-config.js";
+import { ApprovalError, ProviderError, RuntimeError, ToolError } from "../errors.js";
 import { RunloomEventBus } from "../events/event-bus.js";
+import { errorToLogDetails, emitLog } from "../observability/logger.js";
 import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { redactText, redactValue } from "../security/redaction.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
@@ -104,7 +106,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
       workspace: this.workspace,
       getApprovalPolicy: () => this.approvalPolicy,
       saveApproval: (request) => this.store.saveApproval(request),
-      emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload)
+      emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
+      logger: options.logger
     });
 
     if (!options.provider || options.provider === "openai-responses") {
@@ -157,6 +160,18 @@ export class DefaultRunloomAgent implements RunloomAgent {
       input: text,
       workspace: this.workspace
     });
+    this.log({
+      level: "info",
+      code: "run.started",
+      message: "Run started.",
+      runId,
+      sessionId: session.id,
+      details: {
+        workspace: this.workspace,
+        taskType: request.taskType,
+        profile: request.profile
+      }
+    });
 
     const todo: RunloomTodoItem = {
       id: `todo_${randomUUID()}`,
@@ -200,6 +215,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
           outputText: modelResult.outputText,
           approvalId: modelResult.approvalId
         });
+        this.log({
+          level: "warn",
+          code: "run.waiting_approval",
+          message: "Run is waiting for approval.",
+          runId,
+          sessionId: session.id,
+          details: {
+            approvalId: modelResult.approvalId
+          }
+        });
         this.updateStoredRun(runId, {
           status: "waiting_approval",
           outputText: modelResult.outputText,
@@ -224,6 +249,13 @@ export class DefaultRunloomAgent implements RunloomAgent {
       this.emit("run.completed", "runtime", runId, session.id, {
         outputText: modelResult.outputText
       });
+      this.log({
+        level: "info",
+        code: "run.completed",
+        message: "Run completed.",
+        runId,
+        sessionId: session.id
+      });
       this.updateStoredRun(runId, {
         status: "completed",
         outputText: modelResult.outputText
@@ -241,6 +273,13 @@ export class DefaultRunloomAgent implements RunloomAgent {
         this.emit("run.cancelled", "runtime", runId, session.id, {
           reason: "cancelled"
         });
+        this.log({
+          level: "info",
+          code: "run.cancelled",
+          message: "Run cancelled.",
+          runId,
+          sessionId: session.id
+        });
         this.updateStoredRun(runId, {
           status: "cancelled",
           outputText: "Run cancelled."
@@ -257,6 +296,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
       const message = error instanceof Error ? error.message : String(error);
       this.emit("run.failed", "runtime", runId, session.id, {
         error: message
+      });
+      this.log({
+        level: "error",
+        code: "run.failed",
+        message,
+        runId,
+        sessionId: session.id,
+        details: {
+          error: errorToLogDetails(error)
+        }
       });
       this.updateStoredRun(runId, {
         status: "failed",
@@ -286,7 +335,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
   ): Promise<ToolExecutionResult<TOutput>> {
     const tool = this.tools.get(name);
     if (!tool) {
-      throw new Error(`Tool not found: ${name}`);
+      throw new ToolError(`Tool not found: ${name}`, {
+        code: "tool.not_found",
+        details: { toolName: name }
+      });
     }
 
     const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
@@ -363,7 +415,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
   async getSession(sessionId: string): Promise<RunloomSession> {
     const session = this.store.getSession(sessionId);
     if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+      throw new RuntimeError(`Session not found: ${sessionId}`, {
+        code: "runtime.session_not_found",
+        details: { sessionId }
+      });
     }
     return session;
   }
@@ -378,7 +433,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
   async getRun(runId: string): Promise<RunloomRun> {
     const storedRun = this.runs.get(runId);
     if (!storedRun) {
-      throw new Error(`Run not found: ${runId}`);
+      throw new RuntimeError(`Run not found: ${runId}`, {
+        code: "runtime.run_not_found",
+        details: { runId }
+      });
     }
     return cloneRun(storedRun.run);
   }
@@ -393,10 +451,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
   async resume(runId: string): Promise<RunResult> {
     const storedRun = this.runs.get(runId);
     if (!storedRun) {
-      throw new Error(`Run not found: ${runId}`);
+      throw new RuntimeError(`Run not found: ${runId}`, {
+        code: "runtime.run_not_found",
+        details: { runId }
+      });
     }
     if (storedRun.run.status === "running") {
-      throw new Error(`Run is still running: ${runId}`);
+      throw new RuntimeError(`Run is still running: ${runId}`, {
+        code: "runtime.run_still_running",
+        details: { runId }
+      });
     }
     this.emit("run.resumed", "runtime", runId, storedRun.run.sessionId, {
       originalRunId: runId,
@@ -421,22 +485,53 @@ export class DefaultRunloomAgent implements RunloomAgent {
     if (activeRun) {
       activeRun.controller.abort();
       this.emit("run.cancel_requested", "runtime", runId, activeRun.sessionId, {});
+      this.log({
+        level: "info",
+        code: "run.cancel_requested",
+        message: "Run cancellation requested.",
+        runId,
+        sessionId: activeRun.sessionId
+      });
       return;
     }
     this.emit("run.cancelled", "runtime", runId, "unknown", {
       reason: "not_active"
+    });
+    this.log({
+      level: "warn",
+      code: "run.cancelled",
+      message: "Run was not active when cancellation was requested.",
+      runId,
+      sessionId: "unknown",
+      details: {
+        reason: "not_active"
+      }
     });
   }
 
   async resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void> {
     const approval = this.store.getApproval(approvalId);
     if (!approval) {
-      throw new Error(`Approval not found: ${approvalId}`);
+      throw new ApprovalError(`Approval not found: ${approvalId}`, {
+        code: "approval.not_found",
+        details: { approvalId }
+      });
     }
     this.store.resolveApproval(approvalId, decision);
     this.emit("approval.resolved", "approval", approval.runId, approval.sessionId, {
       approvalId,
       decision
+    });
+    this.log({
+      level: "info",
+      code: "approval.resolved",
+      message: "Approval resolved.",
+      runId: approval.runId,
+      sessionId: approval.sessionId,
+      details: {
+        approvalId,
+        decision
+      }
     });
   }
 
@@ -460,6 +555,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
       }
     });
     this.emit("approval.policy.updated", "approval", "policy", "global", this.approvalPolicy);
+    this.log({
+      level: "info",
+      code: "approval.policy.updated",
+      message: "Approval policy updated.",
+      details: this.approvalPolicy
+    });
     return this.approvalPolicy;
   }
 
@@ -549,7 +650,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
           });
         }
         if (event.type === "response.failed") {
-          throw new Error(event.error.message);
+          throw new ProviderError(event.error.message, {
+            code: `provider.${event.error.code}`,
+            retryable: event.error.retryable,
+            statusCode: event.error.statusCode,
+            details: event.error
+          });
         }
       }
 
@@ -586,7 +692,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
       }
     }
 
-    throw new Error(`Model requested tools for more than ${MAX_MODEL_TOOL_STEPS} steps.`);
+    throw new RuntimeError(`Model requested tools for more than ${MAX_MODEL_TOOL_STEPS} steps.`, {
+      code: "runtime.model_tool_step_limit",
+      details: {
+        maxSteps: MAX_MODEL_TOOL_STEPS
+      }
+    });
   }
 
   private modelTools(): RunloomModelTool[] {
@@ -609,6 +720,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
         toolName: toolCall.name,
         error: `Tool not found: ${toolCall.name}`,
         durationMs: 0
+      });
+      this.log({
+        level: "error",
+        code: "tool.not_found",
+        message: `Tool not found: ${toolCall.name}`,
+        runId,
+        sessionId,
+        details: {
+          toolName: toolCall.name
+        }
       });
       return {
         toolName: toolCall.name,
@@ -635,7 +756,9 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private getActiveProvider(): ModelProvider {
     const provider = this.providers.values().next().value as ModelProvider | undefined;
     if (!provider) {
-      throw new Error("No model provider is registered.");
+      throw new ProviderError("No model provider is registered.", {
+        code: "provider.not_registered"
+      });
     }
     return provider;
   }
@@ -643,7 +766,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private getProvider(providerId: string): ModelProvider {
     const provider = this.providers.get(providerId);
     if (!provider) {
-      throw new Error(`Model provider is not registered: ${providerId}`);
+      throw new ProviderError(`Model provider is not registered: ${providerId}`, {
+        code: "provider.not_registered",
+        details: { providerId }
+      });
     }
     return provider;
   }
@@ -688,6 +814,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
       source,
       payload: redactValue(payload, { workspace: this.workspace })
     });
+  }
+
+  private log(input: Parameters<typeof emitLog>[1]): void {
+    emitLog(this.options.logger, input, this.workspace);
   }
 
   private recordAudit(input: Omit<RunloomAuditRecord, "id" | "timestamp">): void {

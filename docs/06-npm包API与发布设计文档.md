@@ -71,6 +71,9 @@ export interface RunloomAgent {
 - `ListEventsOptions`
 - `RunloomAuditRecord`
 - `ListAuditRecordsOptions`
+- `RunloomErrorCategory`
+- `RunloomLogger`
+- `RunloomLogRecord`
 - `RunloomTodoItem`
 - `ApprovalMode`
 - `ApprovalPolicyConfig`
@@ -90,6 +93,14 @@ export interface RunloomAgent {
 - `DiffAdapter`
 - `ApprovalBridge`
 - `DiagnosticsAdapter`
+- `RunloomError`
+- `ProviderError`
+- `ToolError`
+- `ApprovalError`
+- `StoreError`
+- `SecurityError`
+- `RuntimeError`
+- `EvolutionError`
 - `ExternalAgentAdapter`
 - `SkillManifest`
 - `McpServerConfig`
@@ -176,6 +187,32 @@ await agent.updateApprovalPolicy({
 - `full_access` 只是在 guardrails 内自动放行，不会绕过 workspace guard、redaction、trace 或 audit。
 - 工具输出、approval details、事件 payload、模型可见的工具结果和模型输出都会做初版 redaction，覆盖 secret-like key/value、Bearer token、常见 provider key 形态和本地 workspace 绝对路径。
 - redaction 后的文本不可恢复原文；如果宿主 UI 需要展示敏感内容，必须走后续专门的 approval/secret adapter，而不是从事件流或工具结果中读取。
+
+## Error And Logging API
+
+`runloom-agent` 暴露分类错误和结构化日志接口，方便 TUI、CI、daemon、后期 Vue Web 和 VSCode 插件统一诊断：
+
+```ts
+export interface RunloomLogger {
+  log(record: RunloomLogRecord): void;
+}
+
+export interface RunloomLogRecord {
+  timestamp: string;
+  level: "debug" | "info" | "warn" | "error";
+  source: RunloomEvent["source"] | "security";
+  code: string;
+  message: string;
+  runId?: string;
+  sessionId?: string;
+  details?: unknown;
+}
+```
+
+- `CreateRunloomAgentOptions.logger` 可注入宿主 logger。
+- 日志是观测接口，不驱动 runtime 状态；logger 抛错不会中断 agent。
+- 日志进入宿主前会做 redaction，不能依赖日志读取 secret 或 raw workspace 绝对路径。
+- `RunloomError` 及 `ProviderError`、`ToolError`、`ApprovalError`、`StoreError`、`SecurityError`、`RuntimeError`、`EvolutionError` 都包含 `code`、`category`、`retryable`、`statusCode` 和 `details`，并支持 `toJSON()`。
 
 ## Host Adapter API
 

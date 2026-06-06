@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createRunloomAgent } from "../src/index.js";
 import { createDefaultApprovalPolicy } from "../src/approvals/policy.js";
 import { ToolExecutor } from "../src/tools/tool-executor.js";
-import type { ApprovalRequest, ModelProvider, ModelRequest, ToolDefinition } from "../src/types.js";
+import type { ApprovalRequest, ModelProvider, ModelRequest, RunloomLogRecord, ToolDefinition } from "../src/types.js";
 
 describe("approval security", () => {
   it("requires approval for high-risk shell tools in auto_decide mode", async () => {
@@ -93,6 +93,7 @@ describe("approval security", () => {
     await withTempWorkspace(async (workspace) => {
       const rawSecret = "sk-testsecret1234567890";
       const rawJsonSecret = "json-value-12345";
+      const logs: RunloomLogRecord[] = [];
       await writeFile(
         join(workspace, "secret.env"),
         `OPENAI_API_KEY=${rawSecret}\n{"apiKey":"${rawJsonSecret}"}\nPUBLIC_VALUE=ok\n`
@@ -100,7 +101,12 @@ describe("approval security", () => {
       const agent = await createRunloomAgent({
         provider: "openai-responses",
         workspace,
-        apiKey: ""
+        apiKey: "",
+        logger: {
+          log(record) {
+            logs.push(record);
+          }
+        }
       });
 
       const result = await agent.executeTool<{ content: string }>("fs.read", {
@@ -108,6 +114,7 @@ describe("approval security", () => {
       });
       const events = await agent.listEvents({ sessionId: result.sessionId });
       const eventText = JSON.stringify(events);
+      const logText = JSON.stringify(logs);
 
       expect(result.status).toBe("completed");
       expect(result.output?.content).not.toContain(rawSecret);
@@ -117,6 +124,10 @@ describe("approval security", () => {
       expect(eventText).not.toContain(rawSecret);
       expect(eventText).not.toContain(rawJsonSecret);
       expect(eventText).toContain("[redacted:secret]");
+      expect(logs.some((log) => log.source === "tool" && log.code === "tool.call.completed")).toBe(true);
+      expect(logText).not.toContain(rawSecret);
+      expect(logText).not.toContain(rawJsonSecret);
+      expect(logText).toContain("[redacted:secret]");
       await agent.close();
     });
   });

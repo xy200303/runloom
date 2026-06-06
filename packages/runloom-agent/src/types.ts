@@ -80,6 +80,32 @@ export type RunloomEvent = RunloomEventEnvelope;
 export type RunloomEventListener = (event: RunloomEvent) => void;
 export type Unsubscribe = () => void;
 
+export type RunloomErrorCategory =
+  | "provider"
+  | "tool"
+  | "approval"
+  | "store"
+  | "security"
+  | "runtime"
+  | "evolution";
+
+export type RunloomLogLevel = "debug" | "info" | "warn" | "error";
+
+export interface RunloomLogRecord {
+  timestamp: string;
+  level: RunloomLogLevel;
+  source: RunloomEventEnvelope["source"] | "security";
+  code: string;
+  message: string;
+  runId?: string;
+  sessionId?: string;
+  details?: unknown;
+}
+
+export interface RunloomLogger {
+  log(record: RunloomLogRecord): void;
+}
+
 export interface RunloomTodoItem {
   id: string;
   title: string;
@@ -462,6 +488,7 @@ export interface CreateRunloomAgentOptions {
   baseUrl?: string;
   approvalPolicy?: ApprovalPolicyPatch;
   host?: RunloomHostAdapter;
+  logger?: RunloomLogger;
 }
 
 export interface RunloomAgent {

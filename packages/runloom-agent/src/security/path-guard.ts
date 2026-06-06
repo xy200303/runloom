@@ -1,5 +1,6 @@
 import { access, realpath } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
+import { SecurityError } from "../errors.js";
 
 export function resolveWorkspacePath(workspace: string, requestedPath = "."): string {
   const workspaceRoot = resolve(workspace);
@@ -9,7 +10,7 @@ export function resolveWorkspacePath(workspace: string, requestedPath = "."): st
     return target;
   }
 
-  throw new Error(`Path is outside the workspace: ${requestedPath}`);
+  throw securityPathError(requestedPath);
 }
 
 export async function resolveExistingWorkspacePath(workspace: string, requestedPath = "."): Promise<string> {
@@ -21,7 +22,7 @@ export async function resolveExistingWorkspacePath(workspace: string, requestedP
     return target;
   }
 
-  throw new Error(`Path is outside the workspace: ${requestedPath}`);
+  throw securityPathError(requestedPath);
 }
 
 export async function resolveWritableWorkspacePath(workspace: string, requestedPath = "."): Promise<string> {
@@ -35,7 +36,7 @@ export async function resolveWritableWorkspacePath(workspace: string, requestedP
     return target;
   }
 
-  throw new Error(`Path is outside the workspace: ${requestedPath}`);
+  throw securityPathError(requestedPath);
 }
 
 function isPathInsideRoot(root: string, target: string): boolean {
@@ -51,7 +52,10 @@ async function findExistingParent(path: string): Promise<string> {
     }
     const parent = dirname(current);
     if (parent === current) {
-      throw new Error(`No existing parent directory found for path: ${path}`);
+      throw new SecurityError(`No existing parent directory found for path: ${path}`, {
+        code: "security.path.parent_not_found",
+        details: { path }
+      });
     }
     current = parent;
   }
@@ -68,4 +72,11 @@ async function exists(path: string): Promise<boolean> {
 
 function isAbsoluteRelative(path: string): boolean {
   return /^[a-zA-Z]:/.test(path) || path.startsWith("/") || path.startsWith("\\");
+}
+
+function securityPathError(requestedPath: string): SecurityError {
+  return new SecurityError(`Path is outside the workspace: ${requestedPath}`, {
+    code: "security.path.outside_workspace",
+    details: { requestedPath }
+  });
 }

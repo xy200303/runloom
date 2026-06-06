@@ -6,6 +6,16 @@ export async function createRunloomAgent(options: CreateRunloomAgentOptions): Pr
 }
 
 export { APPROVAL_MODES, PERMISSION_SCOPES } from "./approvals/policy.js";
+export {
+  ApprovalError,
+  EvolutionError,
+  ProviderError,
+  RunloomError,
+  RuntimeError,
+  SecurityError,
+  StoreError,
+  ToolError
+} from "./errors.js";
 export { OpenAIResponsesProvider } from "./providers/openai-responses-provider.js";
 export type {
   ApprovalBridge,
@@ -42,11 +52,15 @@ export type {
   RunloomConfig,
   RunloomContentPart,
   RunloomDiffSummary,
+  RunloomErrorCategory,
   RunloomEvent,
   RunloomEventEnvelope,
   RunloomEventListener,
   RunloomHostAdapter,
   RunloomInput,
+  RunloomLogger,
+  RunloomLogLevel,
+  RunloomLogRecord,
   RunloomSkillSummary,
   RunloomModelConfig,
   RunloomModelInputItem,

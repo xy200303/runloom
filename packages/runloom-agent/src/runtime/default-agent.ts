@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { FileApprovalPolicyStore } from "../approvals/file-policy-store.js";
 import { applyApprovalPolicyPatch, createDefaultApprovalPolicy } from "../approvals/policy.js";
 import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-summary.js";
 import { RunloomEventBus } from "../events/event-bus.js";
@@ -52,13 +53,15 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly store = new InMemorySessionStore();
   private readonly providers = new Map<string, ModelProvider>();
   private readonly tools = new Map<string, ToolDefinition>();
+  private readonly approvalPolicyStore?: FileApprovalPolicyStore;
   private readonly toolExecutor: ToolExecutor;
   private approvalPolicy: ApprovalPolicyConfig;
   private sequence = 0;
 
   constructor(private readonly options: CreateRunloomAgentOptions) {
     this.workspace = resolve(options.workspace);
-    this.approvalPolicy = createDefaultApprovalPolicy(options.approvalPolicy);
+    this.approvalPolicyStore = options.stateDir ? new FileApprovalPolicyStore(options.stateDir, this.workspace) : undefined;
+    this.approvalPolicy = this.loadInitialApprovalPolicy(options.approvalPolicy);
     this.toolExecutor = new ToolExecutor({
       workspace: this.workspace,
       getApprovalPolicy: () => this.approvalPolicy,
@@ -227,6 +230,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async updateApprovalPolicy(patch: ApprovalPolicyPatch): Promise<ApprovalPolicyConfig> {
     this.approvalPolicy = applyApprovalPolicyPatch(this.approvalPolicy, patch);
+    this.approvalPolicyStore?.save(this.approvalPolicy);
     this.emit("approval.policy.updated", "approval", "policy", "global", this.approvalPolicy);
     return this.approvalPolicy;
   }
@@ -404,6 +408,18 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   private registerProviderSync(provider: ModelProvider): void {
     this.providers.set(provider.id, provider);
+  }
+
+  private loadInitialApprovalPolicy(patch?: ApprovalPolicyPatch): ApprovalPolicyConfig {
+    const savedPolicy = this.approvalPolicyStore?.load();
+    const policy = savedPolicy ?? createDefaultApprovalPolicy();
+    if (!patch) {
+      return policy;
+    }
+
+    const patchedPolicy = applyApprovalPolicyPatch(policy, patch, savedPolicy ? "host_app" : "user");
+    this.approvalPolicyStore?.save(patchedPolicy);
+    return patchedPolicy;
   }
 
   private emit(type: string, source: RunloomEvent["source"], runId: string, sessionId: string, payload: unknown): void {

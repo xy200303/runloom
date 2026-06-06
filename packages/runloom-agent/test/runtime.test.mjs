@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { createRunloomAgent, OpenAIResponsesProvider } from "../dist/index.js";
 
@@ -20,6 +23,43 @@ test("approval policy can be updated", async () => {
   assert.equal(policy.scopes["filesystem.write"], "ask");
   assert.equal(policy.scopes.shell, "auto_decide");
   await agent.close();
+});
+
+test("approval policy persists when a state directory is configured", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "runloom-state-"));
+
+  try {
+    const firstAgent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: "",
+      stateDir
+    });
+
+    await firstAgent.updateApprovalPolicy({
+      defaultMode: "auto_decide",
+      scopes: {
+        shell: "full_access"
+      }
+    });
+    await firstAgent.close();
+
+    const secondAgent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: "",
+      stateDir
+    });
+
+    const policy = await secondAgent.getApprovalPolicy();
+    assert.equal(policy.defaultMode, "auto_decide");
+    assert.equal(policy.scopes.shell, "full_access");
+    await secondAgent.close();
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
 });
 
 test("missing OpenAI API key fails without product mock output", async () => {

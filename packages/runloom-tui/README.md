@@ -9,6 +9,7 @@ runloom
 ```
 
 Set `OPENAI_API_KEY` before submitting real model requests.
+Approval policy changes are stored under `~/.runloom` by default. Set `RUNLOOM_STATE_DIR` to use another local state directory.
 
 ## Embedded Usage
 

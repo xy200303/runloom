@@ -334,6 +334,7 @@ export interface CreateRunloomAgentOptions {
   provider?: BuiltInProviderName | ModelProvider;
   model?: string;
   workspace: string;
+  stateDir?: string;
   apiKey?: string;
   baseUrl?: string;
   approvalPolicy?: ApprovalPolicyPatch;

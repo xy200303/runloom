@@ -147,6 +147,20 @@ export interface RunloomRun {
   language?: string;
 }
 
+export type RunloomMessageRole = "system" | "user" | "assistant" | "tool";
+
+export interface RunloomMessage {
+  id: string;
+  runId: string;
+  sessionId: string;
+  role: RunloomMessageRole;
+  content: RunloomContentPart[];
+  createdAt: string;
+  name?: string;
+  toolCallId?: string;
+  metadata?: Record<string, string>;
+}
+
 export type RunloomTaskType =
   | "frontend_design"
   | "go_development"
@@ -273,6 +287,12 @@ export interface ListRunsOptions {
 }
 
 export interface ListEventsOptions {
+  sessionId?: string;
+  runId?: string;
+  limit?: number;
+}
+
+export interface ListMessagesOptions {
   sessionId?: string;
   runId?: string;
   limit?: number;
@@ -507,6 +527,7 @@ export interface RunloomAgent {
   listRuns(options?: ListRunsOptions): Promise<RunloomRun[]>;
   getRun(runId: string): Promise<RunloomRun>;
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
+  listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;
   resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void>;

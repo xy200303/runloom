@@ -49,6 +49,7 @@ export interface RunloomAgent {
   listRuns(options?: ListRunsOptions): Promise<RunloomRun[]>;
   getRun(runId: string): Promise<RunloomRun>;
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
+  listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
   listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;
@@ -69,6 +70,9 @@ export interface RunloomAgent {
 - `RunloomRun`
 - `ListRunsOptions`
 - `ListEventsOptions`
+- `RunloomMessage`
+- `RunloomMessageRole`
+- `ListMessagesOptions`
 - `RunloomAuditRecord`
 - `ListAuditRecordsOptions`
 - `RunloomErrorCategory`

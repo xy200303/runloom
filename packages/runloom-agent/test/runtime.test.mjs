@@ -496,6 +496,8 @@ test("runs and events can be queried through the public API", async () => {
   const runEvents = await agent.listEvents({ runId: result.runId });
   const lastEvent = await agent.listEvents({ runId: result.runId, limit: 1 });
   const noEvents = await agent.listEvents({ runId: result.runId, limit: 0 });
+  const messages = await agent.listMessages({ runId: result.runId });
+  const noMessages = await agent.listMessages({ runId: result.runId, limit: 0 });
 
   assert.equal(run.id, result.runId);
   assert.equal(run.sessionId, result.sessionId);
@@ -509,6 +511,12 @@ test("runs and events can be queried through the public API", async () => {
   assert.equal(lastEvent.length, 1);
   assert.equal(lastEvent[0].type, "run.completed");
   assert.deepEqual(noEvents, []);
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].role, "user");
+  assert.equal(messages[0].content[0].text, "查询 run 和 event");
+  assert.equal(messages[1].role, "assistant");
+  assert.equal(messages[1].content[0].text, result.outputText);
+  assert.deepEqual(noMessages, []);
   await agent.close();
 });
 

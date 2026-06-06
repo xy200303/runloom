@@ -21,6 +21,7 @@ import type {
   ExecuteToolOptions,
   ListAuditRecordsOptions,
   ListEventsOptions,
+  ListMessagesOptions,
   ListRunsOptions,
   McpServerSummary,
   ModelSelectionResult,
@@ -35,6 +36,7 @@ import type {
   RunloomEventListener,
   RunloomAuditRecord,
   RunloomInput,
+  RunloomMessage,
   RunloomRun,
   RunloomSession,
   RunloomSkillSummary,
@@ -160,6 +162,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
       input: text,
       workspace: this.workspace
     });
+    this.appendMessage({
+      runId,
+      sessionId: session.id,
+      role: "user",
+      content: [{ type: "text", text }]
+    });
     this.log({
       level: "info",
       code: "run.started",
@@ -211,6 +219,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
           updatedAt: new Date().toISOString()
         };
         this.emit("todo.updated", "runtime", runId, session.id, { items: [blockedTodo] });
+        if (modelResult.outputText) {
+          this.appendMessage({
+            runId,
+            sessionId: session.id,
+            role: "assistant",
+            content: [{ type: "text", text: modelResult.outputText }]
+          });
+        }
         this.emit("run.waiting_approval", "runtime", runId, session.id, {
           outputText: modelResult.outputText,
           approvalId: modelResult.approvalId
@@ -245,6 +261,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
         status: "completed",
         updatedAt: new Date().toISOString()
       };
+      if (modelResult.outputText) {
+        this.appendMessage({
+          runId,
+          sessionId: session.id,
+          role: "assistant",
+          content: [{ type: "text", text: modelResult.outputText }]
+        });
+      }
       this.emit("todo.updated", "runtime", runId, session.id, { items: [completedTodo] });
       this.emit("run.completed", "runtime", runId, session.id, {
         outputText: modelResult.outputText
@@ -344,12 +368,20 @@ export class DefaultRunloomAgent implements RunloomAgent {
     const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
     const runId = options.runId ?? `run_${randomUUID()}`;
 
-    return this.toolExecutor.execute<TOutput>(tool, input, {
+    const result = await this.toolExecutor.execute<TOutput>(tool, input, {
       workspace: this.workspace,
       runId,
       sessionId: session.id,
       signal: options.signal
     });
+    this.appendMessage({
+      runId,
+      sessionId: session.id,
+      role: "tool",
+      name,
+      content: [{ type: "text", text: stringifyToolResult(result) }]
+    });
+    return result;
   }
 
   async listSessions(): Promise<RunloomSession[]> {
@@ -446,6 +478,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
       .listEvents(options.sessionId)
       .filter((event) => !options.runId || event.runId === options.runId);
     return takeLast(events, options.limit).map((event) => ({ ...event }));
+  }
+
+  async listMessages(options: ListMessagesOptions = {}): Promise<RunloomMessage[]> {
+    const messages = this.store.listMessages({
+      sessionId: options.sessionId,
+      runId: options.runId
+    });
+    return takeLast(messages, options.limit).map(cloneMessage);
   }
 
   async resume(runId: string): Promise<RunResult> {
@@ -684,10 +724,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
           };
         }
 
+        const toolOutput = stringifyToolResult(result);
         input.push({
           type: "function_call_output",
           toolCallId: toolCall.toolCallId,
-          output: stringifyToolResult(result)
+          output: toolOutput
+        });
+        this.appendMessage({
+          runId,
+          sessionId,
+          role: "tool",
+          name: toolCall.name,
+          toolCallId: toolCall.toolCallId,
+          content: [{ type: "text", text: toolOutput }]
         });
       }
     }
@@ -820,6 +869,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
     emitLog(this.options.logger, input, this.workspace);
   }
 
+  private appendMessage(input: Omit<RunloomMessage, "id" | "createdAt">): void {
+    const message = redactValue<RunloomMessage>(
+      {
+        id: `msg_${randomUUID()}`,
+        createdAt: new Date().toISOString(),
+        ...input
+      },
+      { workspace: this.workspace }
+    );
+    this.store.appendMessage(message);
+    this.emit("message.created", "runtime", input.runId, input.sessionId, message);
+  }
+
   private recordAudit(input: Omit<RunloomAuditRecord, "id" | "timestamp">): void {
     const record = redactValue<RunloomAuditRecord>(
       {
@@ -852,6 +914,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
 function cloneRun(run: RunloomRun): RunloomRun {
   return {
     ...run
+  };
+}
+
+function cloneMessage(message: RunloomMessage): RunloomMessage {
+  return {
+    ...message,
+    content: message.content.map((part) => ({ ...part })),
+    metadata: message.metadata ? { ...message.metadata } : undefined
   };
 }
 

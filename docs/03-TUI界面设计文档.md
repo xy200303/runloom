@@ -106,6 +106,11 @@ TUI 不解析供应商原始 streaming event。
 - `/review`：进入代码审查输出模式。
 - `/permissions`：查看和修改权限审批模式。
 - `/approval`：同 `/permissions`，聚焦 approval policy。
+- `/approvals`：显示 Approval Center，并选中首个 pending approval。
+- `/approvals next|prev`：切换当前选中的 approval。
+- `/approvals view [id|selected]`：查看指定或当前选中的 approval 详情。
+- `/approvals focus <id>`：选中指定 approval。
+- `/approve selected ...`、`/deny selected ...`：对当前选中的 approval 做决定。
 - `/skills`：显示 skills。
 - `/skills reload`：重新加载 skills。
 - `/mcp`：显示 MCP server 状态。
@@ -150,6 +155,8 @@ Approval 面板展示：
 - command/tool 参数摘要。
 - policy reason。
 - timeout。
+
+Approval Center 使用 `*` 标记当前选中项。`selected`、`current` 或 `.` 都可以作为当前 approval 的命令目标，便于后续全屏快捷键 UI 复用同一套状态语义。
 
 操作：
 

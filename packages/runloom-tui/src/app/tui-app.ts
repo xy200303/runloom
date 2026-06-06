@@ -81,6 +81,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private activeLanguage?: string;
   private activeRunId?: string;
   private activeSessionId?: string;
+  private focusedApprovalId?: string;
   private assistantBuffer = "";
   private readonly viewState: TuiViewState = {
     transcript: [],
@@ -261,6 +262,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /approval default <full_access|ask|auto_decide>",
           "  /approval <scope> <full_access|ask|auto_decide>",
           "  /approvals     List pending approvals",
+          "  /approvals next|prev|view [id]",
           "  /approve <id> [once|session|workspace|global] [mode=<mode>]",
           "  /deny <id> [reason]",
           "  /model        Show or set model overrides",
@@ -837,35 +839,60 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     const approvals = await this.options.agent.listApprovals();
 
     if (!action) {
-      output.write(formatApprovals(approvals));
+      const focusedApprovalId = this.syncFocusedApproval(approvals);
+      output.write(formatApprovals(approvals, focusedApprovalId));
       return;
     }
 
-    if (action !== "view") {
+    if (action === "next" || action === "prev") {
+      const focusedApprovalId = this.moveFocusedApproval(approvals, action === "next" ? 1 : -1);
+      if (!focusedApprovalId) {
+        output.write("Approvals: (none pending)\n");
+        return;
+      }
+      output.write(`Approval focus set to ${focusedApprovalId}\n`);
+      output.write(formatApprovals(approvals, focusedApprovalId));
+      return;
+    }
+
+    if (action !== "view" && action !== "focus") {
       output.write(`Unknown /approvals action: ${action}\n`);
       output.write(formatApprovalsCommandHelp());
       return;
     }
 
-    if (!approvalId) {
-      output.write("Missing approval id for /approvals view\n");
+    const targetApprovalId = approvalId
+      ? this.resolveApprovalTargetId(approvalId, approvals)
+      : this.syncFocusedApproval(approvals);
+    if (!targetApprovalId) {
+      output.write("No approval selected\n");
       return;
     }
 
-    const approval = approvals.find((item) => item.id === approvalId);
+    const approval = approvals.find((item) => item.id === targetApprovalId);
     if (!approval) {
-      output.write(`Approval not found: ${approvalId}\n`);
+      output.write(`Approval not found: ${targetApprovalId}\n`);
       return;
     }
 
+    this.focusedApprovalId = approval.id;
+    if (action === "focus") {
+      output.write(`Approval focus set to ${approval.id}\n`);
+    }
     output.write(formatApprovalDetail(approval));
   }
 
   private async handleApprovalDecisionCommand(command: string): Promise<void> {
     const output = this.options.output ?? defaultOutput;
-    const [action, approvalId, ...rest] = command.split(/\s+/);
-    if (!approvalId) {
+    const [action, approvalTarget, ...rest] = command.split(/\s+/);
+    if (!approvalTarget) {
       output.write(`Missing approval id for ${action}\n`);
+      return;
+    }
+    const approvals = await this.options.agent.listApprovals();
+    const approvalId = this.resolveApprovalTargetId(approvalTarget, approvals);
+    if (!approvalId) {
+      output.write("No approval selected\n");
       return;
     }
     const parsedDecision = parseApprovalDecisionCommand(action, rest);
@@ -878,10 +905,46 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     try {
       await this.options.agent.resolveApproval(approvalId, parsedDecision.decision);
       output.write(`Approval ${approvalId} ${formatApprovalDecision(parsedDecision.decision)}\n`);
+      const remainingApprovals = await this.options.agent.listApprovals();
+      const focusedApprovalId = this.syncFocusedApproval(remainingApprovals);
+      if (focusedApprovalId) {
+        output.write(`Approval focus set to ${focusedApprovalId}\n`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       output.write(`Approval decision failed: ${message}\n`);
     }
+  }
+
+  private syncFocusedApproval(approvals: ApprovalRequest[]): string | undefined {
+    if (approvals.length === 0) {
+      this.focusedApprovalId = undefined;
+      return undefined;
+    }
+    if (!this.focusedApprovalId || !approvals.some((approval) => approval.id === this.focusedApprovalId)) {
+      this.focusedApprovalId = approvals[0]?.id;
+    }
+    return this.focusedApprovalId;
+  }
+
+  private moveFocusedApproval(approvals: ApprovalRequest[], direction: 1 | -1): string | undefined {
+    if (approvals.length === 0) {
+      this.focusedApprovalId = undefined;
+      return undefined;
+    }
+    const currentIndex = approvals.findIndex((approval) => approval.id === this.focusedApprovalId);
+    const nextIndex = currentIndex === -1
+      ? (direction === 1 ? 0 : approvals.length - 1)
+      : (currentIndex + direction + approvals.length) % approvals.length;
+    this.focusedApprovalId = approvals[nextIndex]?.id;
+    return this.focusedApprovalId;
+  }
+
+  private resolveApprovalTargetId(target: string, approvals: ApprovalRequest[]): string | undefined {
+    if (isSelectedApprovalTarget(target)) {
+      return this.syncFocusedApproval(approvals);
+    }
+    return target;
   }
 
   private handleModelCommand(command: string): void {
@@ -1296,20 +1359,23 @@ function formatTools(tools: ToolSummary[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-function formatApprovals(approvals: ApprovalRequest[]): string {
+function formatApprovals(approvals: ApprovalRequest[], focusedApprovalId?: string): string {
   if (approvals.length === 0) {
     return "Approvals: (none pending)\n";
   }
-  const lines = [`Approval Center: ${approvals.length} pending`];
+  const focus = focusedApprovalId ? ` focused=${focusedApprovalId}` : "";
+  const lines = [`Approval Center: ${approvals.length} pending${focus}`];
   for (const approval of approvals) {
     const expires = approval.expiresAt ? ` expires=${approval.expiresAt}` : "";
-    lines.push(`  ${approval.id} risk=${approval.risk} scope=${approval.scope} mode=${approval.mode}${expires}`);
+    const marker = approval.id === focusedApprovalId ? "*" : " ";
+    lines.push(`${marker} ${approval.id} risk=${approval.risk} scope=${approval.scope} mode=${approval.mode}${expires}`);
     lines.push(`    action=${approval.action} run=${approval.runId} session=${approval.sessionId}`);
     lines.push(`    summary: ${approval.summary}`);
     lines.push(
       `    commands: /approve ${approval.id} once | /approve ${approval.id} session | /deny ${approval.id} <reason> | /approvals view ${approval.id}`
     );
   }
+  lines.push("  selection: /approvals next | /approvals prev | /approvals view | /approve selected once | /deny selected <reason>");
   return `${lines.join("\n")}\n`;
 }
 
@@ -1568,17 +1634,20 @@ function formatApprovalsCommandHelp(): string {
   return [
     "Usage:",
     "  /approvals",
-    "  /approvals view <approval-id>",
-    "  /approve <approval-id> [once|session|workspace|global] [mode=<full_access|ask|auto_decide>]",
-    "  /deny <approval-id> [reason]"
+    "  /approvals next",
+    "  /approvals prev",
+    "  /approvals view [approval-id|selected]",
+    "  /approvals focus <approval-id>",
+    "  /approve <approval-id|selected> [once|session|workspace|global] [mode=<full_access|ask|auto_decide>]",
+    "  /deny <approval-id|selected> [reason]"
   ].join("\n") + "\n";
 }
 
 function formatApprovalDecisionCommandHelp(): string {
   return [
     "Usage:",
-    "  /approve <approval-id> [once|session|workspace|global] [mode=<full_access|ask|auto_decide>]",
-    "  /deny <approval-id> [reason]"
+    "  /approve <approval-id|selected> [once|session|workspace|global] [mode=<full_access|ask|auto_decide>]",
+    "  /deny <approval-id|selected> [reason]"
   ].join("\n") + "\n";
 }
 
@@ -1659,6 +1728,10 @@ function parseApprovalDecisionCommand(
   return {
     decision
   };
+}
+
+function isSelectedApprovalTarget(value: string): boolean {
+  return value === "selected" || value === "current" || value === ".";
 }
 
 function formatApprovalDecision(decision: ApprovalDecision): string {

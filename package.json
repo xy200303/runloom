@@ -12,12 +12,12 @@
     "build": "tsc -b packages/runloom-agent packages/runloom-tui",
     "typecheck": "tsc -b packages/runloom-agent packages/runloom-tui --pretty false",
     "test": "pnpm test:unit && pnpm build && node --test packages/runloom-agent/test/runtime.test.mjs packages/runloom-tui/test/tui-app.test.mjs",
-    "test:vitest": "vitest run --config vitest.config.ts",
+    "test:vitest": "pnpm build && vitest run --config vitest.config.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "test:security": "vitest run --config vitest.security.config.ts",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e": "pnpm build && vitest run --config vitest.e2e.config.ts",
     "pack:dry": "npm pack --dry-run --workspace runloom-agent && npm pack --dry-run --workspace runloom-tui"
   },
   "devDependencies": {

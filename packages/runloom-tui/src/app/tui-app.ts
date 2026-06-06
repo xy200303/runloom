@@ -49,6 +49,18 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write("Runloom Code\n");
     output.write("Type /help for commands. Type /quit to exit.\n\n");
 
+    if (!isInteractiveInput(input)) {
+      for await (const rawLine of rl) {
+        await this.handleInputLine(String(rawLine));
+        if (this.stopped) {
+          break;
+        }
+      }
+      rl.close();
+      this.unsubscribe?.();
+      return;
+    }
+
     while (!this.stopped) {
       let answer: string;
       try {
@@ -62,14 +74,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       }
 
       const line = answer.trim();
-      if (!line) {
-        continue;
-      }
-      if (line.startsWith("/")) {
-        await this.runCommand(line);
-        continue;
-      }
-      await this.submitPrompt(line);
+      await this.handleInputLine(line);
     }
 
     rl.close();
@@ -90,6 +95,18 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       taskType: this.activeTaskType,
       language: this.activeLanguage
     });
+  }
+
+  private async handleInputLine(rawLine: string): Promise<void> {
+    const line = rawLine.trim();
+    if (!line) {
+      return;
+    }
+    if (line.startsWith("/")) {
+      await this.runCommand(line);
+      return;
+    }
+    await this.submitPrompt(line);
   }
 
   render(event: RunloomEvent): void {
@@ -323,6 +340,10 @@ function formatErrorPayload(payload: unknown): string {
 
 function isReadlineClosedError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "ERR_USE_AFTER_CLOSE");
+}
+
+function isInteractiveInput(input: Readable): boolean {
+  return Boolean((input as { isTTY?: boolean }).isTTY);
 }
 
 function formatApprovalRequest(payload: unknown): string {

@@ -17,7 +17,7 @@
 - [x] `runloom-agent`、`runloom-tui` 配置 `exports`，禁止用户依赖内部路径。
 - [x] 增加 Vitest 分层测试配置：unit、integration、contract、security、e2e 和 shared config。
 - [x] 默认测试脚本接入 unit tests，并保留现有 Node.js 集成测试入口。
-- [x] 增加首批 Vitest unit、integration、contract、security 测试样例。
+- [x] 增加首批 Vitest unit、integration、contract、security、e2e 测试样例。
 - [ ] 建立 lint 配置和脚本。
 - [ ] 建立 Changesets 或等价版本管理。
 - [ ] 建立 GitHub Actions：typecheck、test、build、pack、publish dry run。

@@ -24,3 +24,20 @@ await agent.close();
 ```
 
 Set `OPENAI_API_KEY` or pass `apiKey` when using the built-in OpenAI Responses provider.
+
+## Built-In Coding Tools
+
+All built-in tools execute through Runloom's event stream and approval policy.
+
+```ts
+const read = await agent.executeTool("fs.read", {
+  path: "package.json"
+});
+
+const verification = await agent.executeTool("shell.verify", {
+  command: "pnpm",
+  args: ["test"]
+});
+```
+
+Default read-only filesystem tools are allowed inside the workspace. Shell and write operations request approval unless the user changes the approval policy.

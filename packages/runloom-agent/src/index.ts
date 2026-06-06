@@ -18,6 +18,7 @@ export type {
   CreateRunloomAgentOptions,
   DiagnosticsAdapter,
   DiffAdapter,
+  ExecuteToolOptions,
   GitStatusSummary,
   ModelCapabilities,
   ModelProvider,
@@ -42,6 +43,7 @@ export type {
   TerminalAdapter,
   ToolContext,
   ToolDefinition,
+  ToolExecutionResult,
   Unsubscribe,
   VerificationResult,
   WorkspaceAdapter

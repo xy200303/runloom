@@ -5,11 +5,14 @@ import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-sum
 import { RunloomEventBus } from "../events/event-bus.js";
 import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
+import { createBuiltInCodingTools } from "../tools/coding-tools.js";
+import { ToolExecutor } from "../tools/tool-executor.js";
 import type {
   ApprovalDecision,
   ApprovalPolicyConfig,
   ApprovalPolicyPatch,
   CreateRunloomAgentOptions,
+  ExecuteToolOptions,
   ModelProvider,
   ModelProviderEvent,
   RunResult,
@@ -22,6 +25,7 @@ import type {
   SubscribeOptions,
   SubmitOptions,
   ToolDefinition,
+  ToolExecutionResult,
   Unsubscribe
 } from "../types.js";
 
@@ -31,12 +35,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly store = new InMemorySessionStore();
   private readonly providers = new Map<string, ModelProvider>();
   private readonly tools = new Map<string, ToolDefinition>();
+  private readonly toolExecutor: ToolExecutor;
   private approvalPolicy: ApprovalPolicyConfig;
   private sequence = 0;
 
   constructor(private readonly options: CreateRunloomAgentOptions) {
     this.workspace = resolve(options.workspace);
     this.approvalPolicy = createDefaultApprovalPolicy(options.approvalPolicy);
+    this.toolExecutor = new ToolExecutor({
+      workspace: this.workspace,
+      getApprovalPolicy: () => this.approvalPolicy,
+      saveApproval: (request) => this.store.saveApproval(request),
+      emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload)
+    });
 
     if (!options.provider || options.provider === "openai-responses") {
       this.registerProviderSync(
@@ -47,6 +58,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
       );
     } else {
       this.registerProviderSync(options.provider);
+    }
+
+    for (const tool of createBuiltInCodingTools()) {
+      this.tools.set(tool.name, tool);
     }
   }
 
@@ -113,6 +128,27 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   subscribe(listener: RunloomEventListener, options?: SubscribeOptions): Unsubscribe {
     return this.bus.subscribe(listener, options);
+  }
+
+  async executeTool<TOutput = unknown>(
+    name: string,
+    input: unknown,
+    options: ExecuteToolOptions = {}
+  ): Promise<ToolExecutionResult<TOutput>> {
+    const tool = this.tools.get(name);
+    if (!tool) {
+      throw new Error(`Tool not found: ${name}`);
+    }
+
+    const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
+    const runId = options.runId ?? `run_${randomUUID()}`;
+
+    return this.toolExecutor.execute<TOutput>(tool, input, {
+      workspace: this.workspace,
+      runId,
+      sessionId: session.id,
+      signal: options.signal
+    });
   }
 
   async listSessions(): Promise<RunloomSession[]> {

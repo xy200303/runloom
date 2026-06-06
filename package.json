@@ -22,7 +22,8 @@
     "test:security": "vitest run --config vitest.security.config.ts",
     "test:e2e": "pnpm build && vitest run --config vitest.e2e.config.ts",
     "version-packages": "changeset version",
-    "pack:dry": "npm pack --dry-run --workspace runloom-agent && npm pack --dry-run --workspace runloom-tui"
+    "pack:dry": "npm pack --dry-run --workspace runloom-agent && npm pack --dry-run --workspace runloom-tui",
+    "publish:dry": "npm publish --dry-run --workspace runloom-agent --access public && npm publish --dry-run --workspace runloom-tui --access public"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

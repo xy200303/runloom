@@ -20,7 +20,7 @@
 - [x] 增加首批 Vitest unit、integration、contract、security、e2e 测试样例。
 - [x] 建立 lint 配置和脚本。
 - [x] 建立 Changesets 或等价版本管理。
-- [ ] 建立 GitHub Actions：typecheck、test、build、pack、publish dry run。
+- [x] 建立 GitHub Actions：typecheck、test、build、pack、publish dry run。
 - [ ] 建立 changelog 和 release checklist。
 
 验收标准：

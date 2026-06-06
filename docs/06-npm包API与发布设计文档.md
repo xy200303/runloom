@@ -50,6 +50,7 @@ export interface RunloomAgent {
   getRun(runId: string): Promise<RunloomRun>;
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
+  listDiffRecords(options?: ListDiffRecordsOptions): Promise<RunloomDiffRecord[]>;
   listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;
@@ -73,6 +74,8 @@ export interface RunloomAgent {
 - `RunloomMessage`
 - `RunloomMessageRole`
 - `ListMessagesOptions`
+- `RunloomDiffRecord`
+- `ListDiffRecordsOptions`
 - `RunloomAuditRecord`
 - `ListAuditRecordsOptions`
 - `RunloomErrorCategory`
@@ -191,6 +194,7 @@ await agent.updateApprovalPolicy({
 - 内置文件工具包括 `fs.list`、`fs.read`、`fs.search`、`fs.write` 和 `fs.patch`；写入和 patch 使用 `filesystem.write` approval scope。
 - `fs.write` 和 `fs.patch` 默认拒绝修改 Git 中已有未提交变更的目标文件，避免覆盖用户改动。
 - `fs.patch` 使用精确文本替换，`fs.write` 和 `fs.patch` 都支持 `expectedSha256` 校验；当调用方确认当前文件 hash 后，才可以继续修改 dirty 文件。
+- `diff.text`、`git.diff`、`fs.patch` 等输出 `RunloomDiffSummary` 的工具会写入 `RunloomDiffRecord`，宿主可以通过 `listDiffRecords()` 回放，也可以通过 `DiffAdapter.showDiff()` 即时展示。
 - `full_access` 只是在 guardrails 内自动放行，不会绕过 workspace guard、redaction、trace 或 audit。
 - 工具输出、approval details、事件 payload、模型可见的工具结果和模型输出都会做初版 redaction，覆盖 secret-like key/value、Bearer token、常见 provider key 形态和本地 workspace 绝对路径。
 - redaction 后的文本不可恢复原文；如果宿主 UI 需要展示敏感内容，必须走后续专门的 approval/secret adapter，而不是从事件流或工具结果中读取。

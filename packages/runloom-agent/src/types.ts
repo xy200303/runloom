@@ -71,7 +71,8 @@ export interface RunloomEventEnvelope<TPayload = unknown> {
     | "memory"
     | "evolution"
     | "eval"
-    | "audit";
+    | "audit"
+    | "diff";
   payload: TPayload;
 }
 
@@ -455,6 +456,23 @@ export interface RunloomDiffSummary {
   patch?: string;
 }
 
+export interface RunloomDiffRecord {
+  id: string;
+  timestamp: string;
+  runId: string;
+  sessionId: string;
+  toolName: string;
+  diff: RunloomDiffSummary;
+  displayed: boolean;
+  displayError?: string;
+}
+
+export interface ListDiffRecordsOptions {
+  sessionId?: string;
+  runId?: string;
+  limit?: number;
+}
+
 export interface VerificationResult {
   command: string;
   exitCode: number;
@@ -528,6 +546,7 @@ export interface RunloomAgent {
   getRun(runId: string): Promise<RunloomRun>;
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
+  listDiffRecords(options?: ListDiffRecordsOptions): Promise<RunloomDiffRecord[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;
   resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void>;

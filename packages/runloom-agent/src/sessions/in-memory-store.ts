@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { ApprovalDecision, ApprovalRequest, RunloomAuditRecord, RunloomMessage, RunloomSession } from "../types.js";
+import type {
+  ApprovalDecision,
+  ApprovalRequest,
+  RunloomAuditRecord,
+  RunloomDiffRecord,
+  RunloomMessage,
+  RunloomSession
+} from "../types.js";
 
 export class InMemorySessionStore {
   private readonly sessions = new Map<string, RunloomSession>();
@@ -7,6 +14,7 @@ export class InMemorySessionStore {
   private readonly approvalDecisions = new Map<string, ApprovalDecision>();
   private readonly auditRecords: RunloomAuditRecord[] = [];
   private readonly messages: RunloomMessage[] = [];
+  private readonly diffRecords: RunloomDiffRecord[] = [];
 
   createSession(workspace: string): RunloomSession {
     const now = new Date().toISOString();
@@ -71,6 +79,19 @@ export class InMemorySessionStore {
         return false;
       }
       return !options.runId || message.runId === options.runId;
+    });
+  }
+
+  appendDiffRecord(record: RunloomDiffRecord): void {
+    this.diffRecords.push(record);
+  }
+
+  listDiffRecords(options: { sessionId?: string; runId?: string } = {}): RunloomDiffRecord[] {
+    return this.diffRecords.filter((record) => {
+      if (options.sessionId && record.sessionId !== options.sessionId) {
+        return false;
+      }
+      return !options.runId || record.runId === options.runId;
     });
   }
 }

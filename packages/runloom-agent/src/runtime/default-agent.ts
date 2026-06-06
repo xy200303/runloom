@@ -20,6 +20,7 @@ import type {
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
   ListAuditRecordsOptions,
+  ListDiffRecordsOptions,
   ListEventsOptions,
   ListMessagesOptions,
   ListRunsOptions,
@@ -35,6 +36,8 @@ import type {
   RunloomEvent,
   RunloomEventListener,
   RunloomAuditRecord,
+  RunloomDiffRecord,
+  RunloomDiffSummary,
   RunloomInput,
   RunloomMessage,
   RunloomRun,
@@ -374,6 +377,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       sessionId: session.id,
       signal: options.signal
     });
+    await this.recordDiffResult(name, result);
     this.appendMessage({
       runId,
       sessionId: session.id,
@@ -486,6 +490,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
       runId: options.runId
     });
     return takeLast(messages, options.limit).map(cloneMessage);
+  }
+
+  async listDiffRecords(options: ListDiffRecordsOptions = {}): Promise<RunloomDiffRecord[]> {
+    const records = this.store.listDiffRecords({
+      sessionId: options.sessionId,
+      runId: options.runId
+    });
+    return takeLast(records, options.limit).map(cloneDiffRecord);
   }
 
   async resume(runId: string): Promise<RunResult> {
@@ -790,12 +802,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
       };
     }
 
-    return this.toolExecutor.execute(tool, toolCall.arguments, {
+    const result = await this.toolExecutor.execute(tool, toolCall.arguments, {
       workspace: this.workspace,
       runId,
       sessionId,
       signal
     });
+    await this.recordDiffResult(toolCall.name, result);
+    return result;
   }
 
   private forwardProviderEvent(event: ModelProviderEvent, runId: string, sessionId: string): void {
@@ -882,6 +896,48 @@ export class DefaultRunloomAgent implements RunloomAgent {
     this.emit("message.created", "runtime", input.runId, input.sessionId, message);
   }
 
+  private async recordDiffResult(toolName: string, result: ToolExecutionResult): Promise<void> {
+    if (result.status !== "completed" || !isRunloomDiffSummary(result.output)) {
+      return;
+    }
+
+    const diff = redactValue(cloneDiffSummary(result.output), { workspace: this.workspace });
+    const record: RunloomDiffRecord = {
+      id: `diff_${randomUUID()}`,
+      timestamp: new Date().toISOString(),
+      runId: result.runId,
+      sessionId: result.sessionId,
+      toolName,
+      diff,
+      displayed: false
+    };
+
+    if (this.options.host?.diff) {
+      try {
+        await this.options.host.diff.showDiff(cloneDiffSummary(diff));
+        record.displayed = true;
+      } catch (error) {
+        record.displayError = error instanceof Error ? error.message : String(error);
+        this.log({
+          level: "warn",
+          source: "diff",
+          code: "diff.display_failed",
+          message: "Diff adapter failed to display a diff record.",
+          runId: result.runId,
+          sessionId: result.sessionId,
+          details: {
+            toolName,
+            error: errorToLogDetails(error)
+          }
+        });
+      }
+    }
+
+    const safeRecord = redactValue(record, { workspace: this.workspace });
+    this.store.appendDiffRecord(safeRecord);
+    this.emit("diff.recorded", "diff", result.runId, result.sessionId, safeRecord);
+  }
+
   private recordAudit(input: Omit<RunloomAuditRecord, "id" | "timestamp">): void {
     const record = redactValue<RunloomAuditRecord>(
       {
@@ -923,6 +979,31 @@ function cloneMessage(message: RunloomMessage): RunloomMessage {
     content: message.content.map((part) => ({ ...part })),
     metadata: message.metadata ? { ...message.metadata } : undefined
   };
+}
+
+function cloneDiffRecord(record: RunloomDiffRecord): RunloomDiffRecord {
+  return {
+    ...record,
+    diff: cloneDiffSummary(record.diff)
+  };
+}
+
+function cloneDiffSummary(diff: RunloomDiffSummary): RunloomDiffSummary {
+  return {
+    filesChanged: [...diff.filesChanged],
+    additions: diff.additions,
+    deletions: diff.deletions,
+    patch: diff.patch
+  };
+}
+
+function isRunloomDiffSummary(value: unknown): value is RunloomDiffSummary {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as { filesChanged?: unknown }).filesChanged) &&
+    (value as { filesChanged: unknown[] }).filesChanged.every((item) => typeof item === "string")
+  );
 }
 
 function takeLast<TItem>(items: TItem[], limit?: number): TItem[] {

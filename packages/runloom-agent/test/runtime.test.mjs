@@ -522,11 +522,20 @@ test("runs and events can be queried through the public API", async () => {
 });
 
 test("built-in coding tools operate on real workspace data", async () => {
+  const displayedDiffs = [];
   const agent = await createRunloomAgent({
     provider: "openai-responses",
     model: "gpt-4.1",
     workspace: process.cwd(),
-    apiKey: ""
+    apiKey: "",
+    host: {
+      kind: "custom",
+      diff: {
+        async showDiff(diff) {
+          displayedDiffs.push(diff);
+        }
+      }
+    }
   });
 
   const readResult = await agent.executeTool("fs.read", { path: "package.json" });
@@ -546,6 +555,14 @@ test("built-in coding tools operate on real workspace data", async () => {
   assert.equal(diffResult.output.filesChanged[0], "sample.txt");
   assert.match(diffResult.output.patch, /-beta/);
   assert.match(diffResult.output.patch, /\+gamma/);
+  const diffRecords = await agent.listDiffRecords({ runId: diffResult.runId });
+  const noDiffRecords = await agent.listDiffRecords({ runId: diffResult.runId, limit: 0 });
+  assert.equal(diffRecords.length, 1);
+  assert.equal(diffRecords[0].toolName, "diff.text");
+  assert.equal(diffRecords[0].displayed, true);
+  assert.equal(diffRecords[0].diff.filesChanged[0], "sample.txt");
+  assert.equal(displayedDiffs.length, 1);
+  assert.deepEqual(noDiffRecords, []);
 
   await agent.close();
 });

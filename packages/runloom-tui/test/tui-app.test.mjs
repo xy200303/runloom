@@ -447,9 +447,39 @@ test("approval command updates scope and default modes", async () => {
       ]
     }
   });
+  app.render({
+    id: "evt_tool_completed",
+    type: "tool.completed",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 3,
+    timestamp: "2026-01-01T00:00:03.500Z",
+    source: "runtime",
+    payload: {
+      toolName: "fs.read",
+      status: "completed"
+    }
+  });
+  app.render({
+    id: "evt_mcp_connected",
+    type: "mcp.server.connected",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 4,
+    timestamp: "2026-01-01T00:00:03.700Z",
+    source: "runtime",
+    payload: {
+      name: "workspace"
+    }
+  });
   await app.runCommand("/status");
   await app.runCommand("/transcript");
   await app.runCommand("/activity");
+  await app.runCommand("/activity models");
+  await app.runCommand("/activity todos");
+  await app.runCommand("/activity reviews");
+  await app.runCommand("/activity tools");
+  await app.runCommand("/activity mcp");
   await app.runCommand("/view");
   for (let index = 0; index < 25; index += 1) {
     app.render({
@@ -547,13 +577,19 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Transcript:\n {2}user: Check TUI commands/);
   assert.match(text, /assistant: Working on it\./);
   assert.match(text, /Activity:\n(?:.*\n)* {2}model completed/);
+  assert.match(text, /Activity \(models\):\n {2}model openai-responses:gpt-test/);
+  assert.match(text, /Activity \(models\):\n(?:.*\n)* {2}model completed/);
+  assert.match(text, /Activity \(todos\):\n {2}todo in_progress: Check TUI commands/);
+  assert.match(text, /Activity \(reviews\):\n {2}review findings recorded/);
+  assert.match(text, /Activity \(tools\):\n {2}tool\.completed fs\.read status=completed/);
+  assert.match(text, /Activity \(mcp\):\n {2}mcp\.server\.connected/);
   assert.match(text, /Focus set to transcript/);
   assert.match(text, /Transcript: showing 1-20 of 27 offset=7/);
   assert.match(text, /assistant: Scroll response 0\./);
   assert.match(text, /Transcript: showing 8-27 of 27/);
   assert.match(text, /assistant: Scroll response 24\./);
   assert.match(text, /Focus set to activity/);
-  assert.match(text, /Activity: showing 1-20 of 30 offset=10/);
+  assert.match(text, /Activity: showing 1-20 of 32 offset=12/);
   assert.match(text, /Shortcut Alt\+1\nFocus set to transcript/);
   assert.match(text, /Shortcut PgUp\nTranscript: showing 1-20 of 27 offset=7/);
   assert.match(text, /Shortcut PgDn\nTranscript: showing 8-27 of 27/);

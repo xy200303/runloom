@@ -26,7 +26,8 @@ const COMPOSITE_PANEL_LINES = 8;
 
 type TuiPanel = "status" | "transcript" | "todo" | "activity";
 type ScrollAction = "up" | "down" | "top" | "bottom";
-type TuiShortcut = "ctrl+l" | "pgup" | "pgdn" | "alt+1" | "alt+2" | "alt+3";
+type TuiShortcut = "ctrl+l" | "pgup" | "pgdn" | "alt+1" | "alt+2" | "alt+3" | "n" | "p" | "v" | "a" | "s" | "d";
+type ApprovalShortcut = Extract<TuiShortcut, "n" | "p" | "v" | "a" | "s" | "d">;
 
 interface TuiViewContext {
   activeSessionId?: string;
@@ -344,7 +345,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/key" || command.startsWith("/key ")) {
-      this.handleShortcutCommand(command);
+      await this.handleShortcutCommand(command);
       return;
     }
 
@@ -617,10 +618,10 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write(this.formatPanel(this.viewState.focus));
   }
 
-  private handleShortcutCommand(command: string): void {
+  private async handleShortcutCommand(command: string): Promise<void> {
     const output = this.options.output ?? defaultOutput;
-    const [, ...parts] = command.split(/\s+/);
-    const shortcut = normalizeShortcut(parts.join(""));
+    const [, shortcutText, ...shortcutArgs] = command.split(/\s+/);
+    const shortcut = normalizeShortcut(shortcutText ?? "");
 
     if (!shortcut) {
       output.write("Invalid keyboard shortcut\n");
@@ -642,6 +643,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
+    if (isApprovalShortcut(shortcut)) {
+      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+      await this.handleApprovalShortcut(shortcut, shortcutArgs);
+      return;
+    }
+
     const panel = panelForShortcut(shortcut);
     if (!panel) {
       output.write("Invalid keyboard shortcut\n");
@@ -652,6 +659,30 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
     output.write(`Focus set to ${panel}\n`);
     output.write(this.formatPanel(panel));
+  }
+
+  private async handleApprovalShortcut(shortcut: ApprovalShortcut, args: string[]): Promise<void> {
+    if (shortcut === "n") {
+      await this.handleApprovalsCommand("/approvals next");
+      return;
+    }
+    if (shortcut === "p") {
+      await this.handleApprovalsCommand("/approvals prev");
+      return;
+    }
+    if (shortcut === "v") {
+      await this.handleApprovalsCommand("/approvals view selected");
+      return;
+    }
+    if (shortcut === "a") {
+      await this.handleApprovalDecisionCommand("/approve selected once");
+      return;
+    }
+    if (shortcut === "s") {
+      await this.handleApprovalDecisionCommand("/approve selected session");
+      return;
+    }
+    await this.handleApprovalDecisionCommand(`/deny selected ${args.join(" ")}`.trimEnd());
   }
 
   private scrollPanel(panel: TuiPanel, action: ScrollAction, amount: number): void {
@@ -1757,7 +1788,7 @@ function formatScrollCommandHelp(): string {
 }
 
 function formatShortcutCommandHelp(): string {
-  return "Usage: /key <ctrl+l|pgup|pgdn|alt+1|alt+2|alt+3>\n";
+  return "Usage: /key <ctrl+l|pgup|pgdn|alt+1|alt+2|alt+3|n|p|v|a|s|d> [deny-reason]\n";
 }
 
 function normalizeShortcut(value: string): TuiShortcut | undefined {
@@ -1780,6 +1811,24 @@ function normalizeShortcut(value: string): TuiShortcut | undefined {
   if (normalized === "alt+3" || normalized === "option+3") {
     return "alt+3";
   }
+  if (normalized === "n" || normalized === "next") {
+    return "n";
+  }
+  if (normalized === "p" || normalized === "prev" || normalized === "previous") {
+    return "p";
+  }
+  if (normalized === "v" || normalized === "view") {
+    return "v";
+  }
+  if (normalized === "a" || normalized === "approve") {
+    return "a";
+  }
+  if (normalized === "s" || normalized === "session") {
+    return "s";
+  }
+  if (normalized === "d" || normalized === "deny") {
+    return "d";
+  }
   return undefined;
 }
 
@@ -1797,7 +1846,23 @@ function formatShortcutLabel(shortcut: TuiShortcut): string {
       return "Alt+2";
     case "alt+3":
       return "Alt+3";
+    case "n":
+      return "N";
+    case "p":
+      return "P";
+    case "v":
+      return "V";
+    case "a":
+      return "A";
+    case "s":
+      return "S";
+    case "d":
+      return "D";
   }
+}
+
+function isApprovalShortcut(shortcut: TuiShortcut): shortcut is ApprovalShortcut {
+  return shortcut === "n" || shortcut === "p" || shortcut === "v" || shortcut === "a" || shortcut === "s" || shortcut === "d";
 }
 
 function panelForShortcut(shortcut: TuiShortcut): TuiPanel | undefined {

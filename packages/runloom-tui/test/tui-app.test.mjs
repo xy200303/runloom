@@ -46,6 +46,19 @@ test("approval command updates scope and default modes", async () => {
       details: {
         path: "src/generated.ts"
       }
+    },
+    {
+      id: "approval_once",
+      runId: "run_tool",
+      sessionId: "ses_tool",
+      scope: "filesystem.read",
+      action: "tool:fs.read",
+      risk: "low",
+      mode: "ask",
+      summary: "Runloom wants to read a file.",
+      details: {
+        path: "src/index.ts"
+      }
     }
   ];
   const sessions = [
@@ -325,12 +338,13 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/permissions");
   await app.runCommand("/permissions set filesystem.write ask");
   await app.runCommand("/approvals");
-  await app.runCommand("/approvals next");
-  await app.runCommand("/approvals prev");
-  await app.runCommand("/approvals view");
-  await app.runCommand("/approve selected session mode=full_access");
-  await app.runCommand("/approvals view selected");
-  await app.runCommand("/deny selected unsafe file write");
+  await app.runCommand("/key n");
+  await app.runCommand("/key p");
+  await app.runCommand("/key v");
+  await app.runCommand("/key s");
+  await app.runCommand("/key v");
+  await app.runCommand("/key d unsafe file write");
+  await app.runCommand("/key a");
   await app.runCommand("/approvals");
   await app.runCommand("/tools");
   await app.runCommand("/skills");
@@ -503,19 +517,22 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Approval Policy:\n {2}default: auto_decide/);
   assert.match(text, /filesystem\.write\s+auto_decide\s+default/);
   assert.match(text, /Approval mode for filesystem\.write set to ask/);
-  assert.match(text, /Approval Center: 2 pending focused=approval_test/);
+  assert.match(text, /Approval Center: 3 pending focused=approval_test/);
   assert.match(text, /\* approval_test risk=high scope=shell mode=ask/);
-  assert.match(text, /Approval focus set to approval_deny\nApproval Center: 2 pending focused=approval_deny/);
-  assert.match(text, /Approval focus set to approval_test\nApproval Center: 2 pending focused=approval_test/);
+  assert.match(text, /Shortcut N\nApproval focus set to approval_deny\nApproval Center: 3 pending focused=approval_deny/);
+  assert.match(text, /Shortcut P\nApproval focus set to approval_test\nApproval Center: 3 pending focused=approval_test/);
   assert.match(text, /action=tool:shell\.verify run=run_tool session=ses_tool/);
   assert.match(text, /commands: \/approve approval_test once \| \/approve approval_test session \| \/deny approval_test <reason> \| \/approvals view approval_test/);
   assert.match(text, /selection: \/approvals next \| \/approvals prev \| \/approvals view \| \/approve selected once \| \/deny selected <reason>/);
+  assert.match(text, /Shortcut V\nApproval: approval_test/);
   assert.match(text, /Approval: approval_test/);
   assert.match(text, /"command": "pnpm test"/);
-  assert.match(text, /Approval approval_test approved remember=session setModeForScope=full_access/);
+  assert.match(text, /Shortcut S\nApproval approval_test approved remember=session/);
   assert.match(text, /Approval focus set to approval_deny/);
-  assert.match(text, /Approval: approval_deny/);
-  assert.match(text, /Approval approval_deny denied reason=unsafe file write/);
+  assert.match(text, /Shortcut V\nApproval: approval_deny/);
+  assert.match(text, /Shortcut D\nApproval approval_deny denied reason=unsafe file write/);
+  assert.match(text, /Approval focus set to approval_once/);
+  assert.match(text, /Shortcut A\nApproval approval_once approved remember=never/);
   assert.match(text, /Approvals: \(none pending\)/);
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
   assert.match(text, /typescript-code-review@0\.1\.0 enabled source=registered tools=fs\.read/);
@@ -592,8 +609,7 @@ test("approval command updates scope and default modes", async () => {
       approvalId: "approval_test",
       decision: {
         decision: "approved",
-        remember: "session",
-        setModeForScope: "full_access"
+        remember: "session"
       }
     },
     {
@@ -601,6 +617,13 @@ test("approval command updates scope and default modes", async () => {
       decision: {
         decision: "denied",
         reason: "unsafe file write"
+      }
+    },
+    {
+      approvalId: "approval_once",
+      decision: {
+        decision: "approved",
+        remember: "never"
       }
     }
   ]);

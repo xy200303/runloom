@@ -3,6 +3,7 @@ import type {
   ApprovalDecision,
   ApprovalRequest,
   RunloomAuditRecord,
+  RunloomDeliverySummary,
   RunloomDiffRecord,
   RunloomEditPlan,
   RunloomMessage,
@@ -16,6 +17,7 @@ export class InMemorySessionStore {
   private readonly auditRecords: RunloomAuditRecord[] = [];
   private readonly messages: RunloomMessage[] = [];
   private readonly editPlans: RunloomEditPlan[] = [];
+  private readonly deliverySummaries: RunloomDeliverySummary[] = [];
   private readonly diffRecords: RunloomDiffRecord[] = [];
 
   createSession(workspace: string): RunloomSession {
@@ -97,6 +99,19 @@ export class InMemorySessionStore {
         return false;
       }
       return !options.status || plan.status === options.status;
+    });
+  }
+
+  appendDeliverySummary(summary: RunloomDeliverySummary): void {
+    this.deliverySummaries.push(summary);
+  }
+
+  listDeliverySummaries(options: { sessionId?: string; runId?: string } = {}): RunloomDeliverySummary[] {
+    return this.deliverySummaries.filter((summary) => {
+      if (options.sessionId && summary.sessionId !== options.sessionId) {
+        return false;
+      }
+      return !options.runId || summary.runId === options.runId;
     });
   }
 

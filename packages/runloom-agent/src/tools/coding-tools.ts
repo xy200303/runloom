@@ -4,7 +4,17 @@ import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import { FILE_HEADERS_ONLY, createTwoFilesPatch } from "diff";
-import type { CodeEditPlan, GitStatusSummary, RunloomDiffSummary, RunloomEditPlan, ToolDefinition, VerificationResult } from "../types.js";
+import type {
+  CodeDeliverySummary,
+  CodeEditPlan,
+  GitStatusSummary,
+  RunloomDeliverySummary,
+  RunloomDeliveryVerificationResult,
+  RunloomDiffSummary,
+  RunloomEditPlan,
+  ToolDefinition,
+  VerificationResult
+} from "../types.js";
 import {
   resolveExistingWorkspacePath,
   resolveWritableWorkspacePath
@@ -24,7 +34,8 @@ export function createBuiltInCodingTools(): ToolDefinition[] {
     createDiffTextTool(),
     createVerifyCommandTool(),
     createGitStatusTool(),
-    createGitDiffTool()
+    createGitDiffTool(),
+    createDeliverySummaryTool()
   ];
 }
 
@@ -175,6 +186,56 @@ function createEditPlanTool(): ToolDefinition<CodeEditPlan, RunloomEditPlan> {
         reason: input.reason === undefined ? undefined : requireNonEmptyString(input.reason, "reason"),
         createdAt: now,
         updatedAt: now
+      };
+    }
+  };
+}
+
+function createDeliverySummaryTool(): ToolDefinition<CodeDeliverySummary, RunloomDeliverySummary> {
+  return {
+    name: "delivery.summary",
+    description: "Record the final delivery summary for a coding task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        modifiedFiles: { type: "array", items: { type: "string" } },
+        coreChanges: { type: "array", items: { type: "string" } },
+        verificationResults: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              command: { type: "string" },
+              status: { type: "string", enum: ["passed", "failed", "skipped"] },
+              exitCode: { type: "number" },
+              durationMs: { type: "number" },
+              summary: { type: "string" }
+            },
+            required: ["command", "status"],
+            additionalProperties: false
+          }
+        },
+        failedItems: { type: "array", items: { type: "string" } },
+        remainingRisks: { type: "array", items: { type: "string" } },
+        notes: { type: "string" }
+      },
+      required: ["modifiedFiles", "coreChanges", "verificationResults", "failedItems", "remainingRisks"],
+      additionalProperties: false
+    },
+    permissions: [],
+    async execute(input, context) {
+      const now = new Date().toISOString();
+      return {
+        id: `delivery_${randomUUID()}`,
+        runId: context.runId,
+        sessionId: context.sessionId,
+        modifiedFiles: requireStringArray(input.modifiedFiles, "modifiedFiles"),
+        coreChanges: requireStringArray(input.coreChanges, "coreChanges"),
+        verificationResults: requireVerificationResults(input.verificationResults),
+        failedItems: requireStringArray(input.failedItems, "failedItems"),
+        remainingRisks: requireStringArray(input.remainingRisks, "remainingRisks"),
+        notes: input.notes === undefined ? undefined : requireNonEmptyString(input.notes, "notes"),
+        createdAt: now
       };
     }
   };
@@ -538,6 +599,47 @@ function requireNonEmptyStringArray(value: unknown, fieldName: string): string[]
     throw new Error(`edit.plan requires at least one ${fieldName} entry.`);
   }
   return normalized;
+}
+
+function requireStringArray(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`delivery.summary requires ${fieldName} to be a string array.`);
+  }
+  return value.map((item) => requireNonEmptyString(item, fieldName));
+}
+
+function requireVerificationResults(value: unknown): RunloomDeliveryVerificationResult[] {
+  if (!Array.isArray(value)) {
+    throw new Error("delivery.summary requires verificationResults to be an array.");
+  }
+
+  return value.map((item) => {
+    if (typeof item !== "object" || item === null) {
+      throw new Error("delivery.summary requires each verification result to be an object.");
+    }
+    const result = item as Partial<RunloomDeliveryVerificationResult>;
+    if (!isVerificationStatus(result.status)) {
+      throw new Error("delivery.summary verification result status must be passed, failed, or skipped.");
+    }
+    return {
+      command: requireNonEmptyString(result.command, "verificationResults.command"),
+      status: result.status,
+      exitCode: result.exitCode === undefined ? undefined : requireFiniteNumber(result.exitCode, "verificationResults.exitCode"),
+      durationMs: result.durationMs === undefined ? undefined : requireFiniteNumber(result.durationMs, "verificationResults.durationMs"),
+      summary: result.summary === undefined ? undefined : requireNonEmptyString(result.summary, "verificationResults.summary")
+    };
+  });
+}
+
+function isVerificationStatus(value: unknown): value is RunloomDeliveryVerificationResult["status"] {
+  return value === "passed" || value === "failed" || value === "skipped";
+}
+
+function requireFiniteNumber(value: unknown, fieldName: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`delivery.summary requires ${fieldName} to be a finite number.`);
+  }
+  return value;
 }
 
 async function assertFileCanBeModified(

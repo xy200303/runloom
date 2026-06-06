@@ -51,6 +51,7 @@ export interface RunloomAgent {
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
   listEditPlans(options?: ListEditPlansOptions): Promise<RunloomEditPlan[]>;
+  listDeliverySummaries(options?: ListDeliverySummariesOptions): Promise<RunloomDeliverySummary[]>;
   listDiffRecords(options?: ListDiffRecordsOptions): Promise<RunloomDiffRecord[]>;
   listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;
   resume(runId: string): Promise<RunResult>;
@@ -78,6 +79,10 @@ export interface RunloomAgent {
 - `RunloomEditPlan`
 - `RunloomEditPlanStatus`
 - `ListEditPlansOptions`
+- `RunloomDeliverySummary`
+- `RunloomDeliveryVerificationResult`
+- `RunloomDeliveryVerificationStatus`
+- `ListDeliverySummariesOptions`
 - `RunloomDiffRecord`
 - `ListDiffRecordsOptions`
 - `RunloomAuditRecord`
@@ -96,6 +101,7 @@ export interface RunloomAgent {
 - `ToolContext`
 - `CodingTaskSummary`
 - `CodeEditPlan`
+- `CodeDeliverySummary`
 - `RunloomDiffSummary`
 - `VerificationResult`
 - `RunloomHostAdapter`
@@ -198,6 +204,8 @@ await agent.updateApprovalPolicy({
 - 内置文件工具包括 `fs.list`、`fs.read`、`fs.search`、`fs.write` 和 `fs.patch`；写入和 patch 使用 `filesystem.write` approval scope。
 - 高风险代码修改前，模型或宿主应先调用 `edit.plan` 记录修改目标、目标文件、风险和验证命令；该工具不修改文件，不需要额外权限。
 - `edit.plan` 会写入 `RunloomEditPlan`，宿主可以通过 `listEditPlans()` 回放，并监听 `edit.plan.created` 事件构建计划面板或审计视图。
+- 任务完成前，模型或宿主应调用 `delivery.summary` 记录修改文件、核心变更、验证结果、失败项和剩余风险；该工具不修改文件，不需要额外权限。
+- `delivery.summary` 会写入 `RunloomDeliverySummary`，宿主可以通过 `listDeliverySummaries()` 回放，并监听 `delivery.summary.created` 事件构建交付摘要、发布说明或审计视图。
 - `fs.write` 和 `fs.patch` 默认拒绝修改 Git 中已有未提交变更的目标文件，避免覆盖用户改动。
 - `fs.patch` 使用精确文本替换，`fs.write` 和 `fs.patch` 都支持 `expectedSha256` 校验；当调用方确认当前文件 hash 后，才可以继续修改 dirty 文件。
 - `diff.text`、`git.diff`、`fs.patch` 等输出 `RunloomDiffSummary` 的工具会写入 `RunloomDiffRecord`，宿主可以通过 `listDiffRecords()` 回放，也可以通过 `DiffAdapter.showDiff()` 即时展示；文本 diff 和 patch 生成优先使用成熟 diff 库，Runloom 只包安全、事件和记录边界。

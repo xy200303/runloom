@@ -20,6 +20,7 @@ import type {
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
   ListAuditRecordsOptions,
+  ListDeliverySummariesOptions,
   ListDiffRecordsOptions,
   ListEditPlansOptions,
   ListEventsOptions,
@@ -37,6 +38,7 @@ import type {
   RunloomEvent,
   RunloomEventListener,
   RunloomAuditRecord,
+  RunloomDeliverySummary,
   RunloomDiffRecord,
   RunloomDiffSummary,
   RunloomEditPlan,
@@ -381,6 +383,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
     });
     await this.recordDiffResult(name, result);
     this.recordEditPlanResult(name, result);
+    this.recordDeliverySummaryResult(name, result);
     this.appendMessage({
       runId,
       sessionId: session.id,
@@ -502,6 +505,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
       status: options.status
     });
     return takeLast(plans, options.limit).map(cloneEditPlan);
+  }
+
+  async listDeliverySummaries(options: ListDeliverySummariesOptions = {}): Promise<RunloomDeliverySummary[]> {
+    const summaries = this.store.listDeliverySummaries({
+      sessionId: options.sessionId,
+      runId: options.runId
+    });
+    return takeLast(summaries, options.limit).map(cloneDeliverySummary);
   }
 
   async listDiffRecords(options: ListDiffRecordsOptions = {}): Promise<RunloomDiffRecord[]> {
@@ -661,7 +672,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
           {
             type: "text",
             text:
-              "You are Runloom, a professional local coding agent. Be concise, cite local evidence, protect user changes, and summarize verification. Before high-risk code modifications, call edit.plan with target files, risks, and verification commands."
+              "You are Runloom, a professional local coding agent. Be concise, cite local evidence, protect user changes, and summarize verification. Before high-risk code modifications, call edit.plan with target files, risks, and verification commands. At task completion, call delivery.summary with modified files, core changes, verification results, failed items, and remaining risks."
           }
         ]
       },
@@ -822,6 +833,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
     });
     await this.recordDiffResult(toolCall.name, result);
     this.recordEditPlanResult(toolCall.name, result);
+    this.recordDeliverySummaryResult(toolCall.name, result);
     return result;
   }
 
@@ -961,6 +973,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
     this.emit("edit.plan.created", "coding", result.runId, result.sessionId, plan);
   }
 
+  private recordDeliverySummaryResult(toolName: string, result: ToolExecutionResult): void {
+    if (toolName !== "delivery.summary" || result.status !== "completed" || !isRunloomDeliverySummary(result.output)) {
+      return;
+    }
+
+    const summary = redactValue(cloneDeliverySummary(result.output), { workspace: this.workspace });
+    this.store.appendDeliverySummary(summary);
+    this.emit("delivery.summary.created", "coding", result.runId, result.sessionId, summary);
+  }
+
   private recordAudit(input: Omit<RunloomAuditRecord, "id" | "timestamp">): void {
     const record = redactValue<RunloomAuditRecord>(
       {
@@ -1020,6 +1042,17 @@ function cloneEditPlan(plan: RunloomEditPlan): RunloomEditPlan {
   };
 }
 
+function cloneDeliverySummary(summary: RunloomDeliverySummary): RunloomDeliverySummary {
+  return {
+    ...summary,
+    modifiedFiles: [...summary.modifiedFiles],
+    coreChanges: [...summary.coreChanges],
+    verificationResults: summary.verificationResults.map((result) => ({ ...result })),
+    failedItems: [...summary.failedItems],
+    remainingRisks: [...summary.remainingRisks]
+  };
+}
+
 function cloneDiffSummary(diff: RunloomDiffSummary): RunloomDiffSummary {
   return {
     filesChanged: [...diff.filesChanged],
@@ -1054,6 +1087,43 @@ function isRunloomEditPlan(value: unknown): value is RunloomEditPlan {
     isStringArray(plan.verificationCommands) &&
     typeof plan.createdAt === "string" &&
     typeof plan.updatedAt === "string"
+  );
+}
+
+function isRunloomDeliverySummary(value: unknown): value is RunloomDeliverySummary {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const summary = value as Partial<RunloomDeliverySummary>;
+  return (
+    typeof summary.id === "string" &&
+    typeof summary.runId === "string" &&
+    typeof summary.sessionId === "string" &&
+    typeof summary.createdAt === "string" &&
+    isStringArray(summary.modifiedFiles) &&
+    isStringArray(summary.coreChanges) &&
+    isVerificationResultArray(summary.verificationResults) &&
+    isStringArray(summary.failedItems) &&
+    isStringArray(summary.remainingRisks)
+  );
+}
+
+function isVerificationResultArray(value: unknown): value is RunloomDeliverySummary["verificationResults"] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => {
+      if (typeof item !== "object" || item === null) {
+        return false;
+      }
+      const result = item as Partial<RunloomDeliverySummary["verificationResults"][number]>;
+      return (
+        typeof result.command === "string" &&
+        (result.status === "passed" || result.status === "failed" || result.status === "skipped") &&
+        (result.exitCode === undefined || typeof result.exitCode === "number") &&
+        (result.durationMs === undefined || typeof result.durationMs === "number") &&
+        (result.summary === undefined || typeof result.summary === "string")
+      );
+    })
   );
 }
 

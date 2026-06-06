@@ -468,6 +468,38 @@ export interface ListEditPlansOptions {
   limit?: number;
 }
 
+export type RunloomDeliveryVerificationStatus = "passed" | "failed" | "skipped";
+
+export interface RunloomDeliveryVerificationResult {
+  command: string;
+  status: RunloomDeliveryVerificationStatus;
+  exitCode?: number;
+  durationMs?: number;
+  summary?: string;
+}
+
+export interface CodeDeliverySummary {
+  modifiedFiles: string[];
+  coreChanges: string[];
+  verificationResults: RunloomDeliveryVerificationResult[];
+  failedItems: string[];
+  remainingRisks: string[];
+  notes?: string;
+}
+
+export interface RunloomDeliverySummary extends CodeDeliverySummary {
+  id: string;
+  runId: string;
+  sessionId: string;
+  createdAt: string;
+}
+
+export interface ListDeliverySummariesOptions {
+  sessionId?: string;
+  runId?: string;
+  limit?: number;
+}
+
 export interface RunloomDiffSummary {
   filesChanged: string[];
   additions?: number;
@@ -566,6 +598,7 @@ export interface RunloomAgent {
   listEvents(options?: ListEventsOptions): Promise<RunloomEvent[]>;
   listMessages(options?: ListMessagesOptions): Promise<RunloomMessage[]>;
   listEditPlans(options?: ListEditPlansOptions): Promise<RunloomEditPlan[]>;
+  listDeliverySummaries(options?: ListDeliverySummariesOptions): Promise<RunloomDeliverySummary[]>;
   listDiffRecords(options?: ListDiffRecordsOptions): Promise<RunloomDiffRecord[]>;
   resume(runId: string): Promise<RunResult>;
   cancel(runId: string): Promise<void>;

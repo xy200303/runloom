@@ -183,6 +183,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /model profile <name>",
           "  /model clear",
           "  /tools         List registered coding tools",
+          "  /git           Show git status",
+          "  /tests         Run verification command",
           "  /quit          Exit"
         ].join("\n") + "\n"
       );
@@ -201,6 +203,16 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
+    if (command === "/git") {
+      await this.handleGitCommand();
+      return;
+    }
+
+    if (command === "/tests" || command.startsWith("/tests ")) {
+      await this.handleTestsCommand(command);
+      return;
+    }
+
     if (command.startsWith("/model")) {
       this.handleModelCommand(command);
       return;
@@ -212,6 +224,27 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     output.write(`Unknown command: ${command}\n`);
+  }
+
+  private async handleGitCommand(): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const result = await this.options.agent.executeTool("git.status", {});
+    if (result.status !== "completed") {
+      output.write(formatToolExecutionState(result));
+      return;
+    }
+    output.write(`[git] ${formatGitStatus(result.output)}\n`);
+  }
+
+  private async handleTestsCommand(command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const verification = parseVerificationCommand(command);
+    const result = await this.options.agent.executeTool("shell.verify", verification);
+    if (result.status !== "completed") {
+      output.write(formatToolExecutionState(result));
+      return;
+    }
+    output.write(formatVerificationResult(result.output));
   }
 
   private async handleApprovalCommand(command: string): Promise<void> {
@@ -382,6 +415,41 @@ function formatTools(tools: ToolSummary[]): string {
     lines.push(`  ${tool.name} - ${tool.description} [${permissions}]`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatToolExecutionState(result: { toolName: string; status: string; error?: string; approvalId?: string }): string {
+  if (result.status === "waiting_approval") {
+    return `[tool] ${result.toolName} waiting for approval ${result.approvalId ?? ""}\n`;
+  }
+  return `[tool] ${result.toolName} ${result.status}${result.error ? `: ${result.error}` : ""}\n`;
+}
+
+function formatVerificationResult(payload: unknown): string {
+  const result = payload as { command?: string; exitCode?: number; durationMs?: number; stdout?: string; stderr?: string };
+  const lines = [
+    `[tests] ${result.command ?? "verification"} exit=${result.exitCode ?? "unknown"} duration=${result.durationMs ?? 0}ms`
+  ];
+  if (result.stdout?.trim()) {
+    lines.push(result.stdout.trim());
+  }
+  if (result.stderr?.trim()) {
+    lines.push(result.stderr.trim());
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function parseVerificationCommand(command: string): { command: string; args: string[] } {
+  const parts = command.split(/\s+/).slice(1).filter(Boolean);
+  if (parts.length === 0) {
+    return {
+      command: "pnpm",
+      args: ["test"]
+    };
+  }
+  return {
+    command: parts[0] ?? "pnpm",
+    args: parts.slice(1)
+  };
 }
 
 function formatActiveModelState(model?: string, profile?: string, taskType?: string, language?: string): string {

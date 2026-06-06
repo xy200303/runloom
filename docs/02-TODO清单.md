@@ -131,7 +131,7 @@
 - [ ] coding activity 展示：文件读取、patch、diff、测试命令、git 状态。
 - [ ] approval 弹窗。
 - [ ] `/permissions` 权限审批设置面板。
-- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/quit`；仍需 `/session`、`/todo`、`/diff`、`/git`、`/tests`、`/review`、`/skills`、`/mcp`、`/stop`、`/resume`。
+- [~] 基础命令：已实现 `/help`、`/status`、`/permissions`、`/approval`、`/tools`、`/model`、`/git`、`/tests`、`/quit`；仍需 `/session`、`/todo`、`/diff`、`/review`、`/skills`、`/mcp`、`/stop`、`/resume`。
 - [ ] 事件回放和滚动。
 
 验收标准：

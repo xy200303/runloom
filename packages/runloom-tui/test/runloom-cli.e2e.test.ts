@@ -12,6 +12,7 @@ describe("runloom CLI e2e", () => {
       const result = await runCli(
         [
           "/help",
+          "/git",
           "/model profile frontend_design",
           "/model",
           "/model clear",
@@ -24,6 +25,7 @@ describe("runloom CLI e2e", () => {
       expect(result.stderr).toBe("");
       expect(result.stdout).toContain("Runloom Code");
       expect(result.stdout).toContain("Commands:");
+      expect(result.stdout).toContain("[git]");
       expect(result.stdout).toContain("Model profile set to frontend_design");
       expect(result.stdout).toContain("profile: frontend_design");
       expect(result.stdout).toContain("Model overrides cleared");

@@ -18,6 +18,7 @@ test("approval command updates scope and default modes", async () => {
   const cancelCalls = [];
   const resumeCalls = [];
   const approvalDecisions = [];
+  const listEventCalls = [];
   let pendingApprovals = [
     {
       id: "approval_test",
@@ -143,7 +144,8 @@ test("approval command updates scope and default modes", async () => {
     async listSessions() {
       return sessions;
     },
-    async listEvents() {
+    async listEvents(options) {
+      listEventCalls.push(options);
       return [
         {
           id: "evt_replay_run",
@@ -469,6 +471,9 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/stop");
   await app.runCommand("/resume run_tool");
   await app.runCommand("/replay");
+  await app.runCommand("/clear");
+  await app.runCommand("/view");
+  await app.runCommand("/session switch ses_tool");
   await app.runCommand("/model profile frontend_design");
   await app.submitPrompt("设计一个前端界面");
   await app.runCommand("/model set kimi:kimi-design");
@@ -533,6 +538,8 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /user: Replay a stored task/);
   assert.match(text, /assistant: Replay answer\./);
   assert.match(text, /completed Replay stored events/);
+  assert.match(text, /View cleared\nStatus:\n {2}session: ses_tool\n {2}run: run_replay status=completed\n(?:.*\n)*Todo: \(none\)\nActivity: \(none\)\nTranscript: \(empty\)/);
+  assert.match(text, /Session switched to ses_tool\n\[replay\] loaded 6 event\(s\)\nStatus:\n {2}session: ses_tool\n {2}run: run_replay status=completed/);
   assert.match(text, /Model profile set to frontend_design/);
   assert.match(text, /Model override set to kimi:kimi-design/);
   assert.match(text, /Review mode enabled/);
@@ -550,6 +557,16 @@ test("approval command updates scope and default modes", async () => {
   assert.deepEqual(toolCalls[2], { name: "shell.verify", input: { command: "pnpm", args: ["typecheck"] } });
   assert.deepEqual(cancelCalls, ["run_tool"]);
   assert.deepEqual(resumeCalls, ["run_tool"]);
+  assert.deepEqual(listEventCalls, [
+    {
+      sessionId: "ses_tool",
+      limit: 200
+    },
+    {
+      sessionId: "ses_tool",
+      limit: 200
+    }
+  ]);
   assert.deepEqual(approvalDecisions, [
     {
       approvalId: "approval_test",

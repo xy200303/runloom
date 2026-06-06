@@ -251,6 +251,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /activity      Show recent activity",
           "  /focus <panel> Focus status, transcript, todo, or activity",
           "  /scroll <dir>  Scroll focused panel up, down, top, or bottom",
+          "  /clear        Clear the current view without deleting the session",
           "  /replay        Rebuild panels from stored events",
           "  /permissions   Show or update approval policy panel",
           "  /permissions set <scope|default> <mode>",
@@ -329,6 +330,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
         activeTaskType: this.activeTaskType,
         activeLanguage: this.activeLanguage
       }));
+      return;
+    }
+
+    if (command === "/clear") {
+      this.clearViewState({ preserveActiveRun: true, preserveLatestModel: true });
+      output.write("View cleared\n");
       return;
     }
 
@@ -481,10 +488,17 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       const session = await this.options.agent.getSession(sessionId);
       this.activeSessionId = session.id;
       this.activeRunId = undefined;
-      this.viewState.todoItems = [];
-      this.viewState.runStatus = "idle";
-      this.resetScrollOffsets();
+      const events = await this.rebuildFromStoredEvents(session.id);
       output.write(`Session switched to ${session.id}\n`);
+      output.write(`[replay] loaded ${events.length} event(s)\n`);
+      output.write(formatCompositeView(this.viewState, {
+        activeSessionId: this.activeSessionId,
+        activeRunId: this.activeRunId,
+        activeModel: this.activeModel,
+        activeProfile: this.activeProfile,
+        activeTaskType: this.activeTaskType,
+        activeLanguage: this.activeLanguage
+      }));
       return;
     }
 
@@ -537,11 +551,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
   private async handleReplayCommand(): Promise<void> {
     const output = this.options.output ?? defaultOutput;
-    const events = await this.options.agent.listEvents({
-      sessionId: this.activeSessionId,
-      limit: MAX_VIEW_LINES
-    });
-    this.rebuildViewState(events);
+    const events = await this.rebuildFromStoredEvents(this.activeSessionId);
     output.write(`[replay] loaded ${events.length} event(s)\n`);
     output.write(formatCompositeView(this.viewState, {
       activeSessionId: this.activeSessionId,
@@ -886,6 +896,15 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write(formatModelCommandHelp());
   }
 
+  private async rebuildFromStoredEvents(sessionId?: string): Promise<RunloomEvent[]> {
+    const events = await this.options.agent.listEvents({
+      sessionId,
+      limit: MAX_VIEW_LINES
+    });
+    this.rebuildViewState(events);
+    return events;
+  }
+
   private applyEventToViewState(event: RunloomEvent): void {
     switch (event.type) {
       case "run.started": {
@@ -987,19 +1006,26 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   }
 
   private rebuildViewState(events: RunloomEvent[]): void {
-    this.viewState.transcript = [];
-    this.viewState.activity = [];
-    this.viewState.todoItems = [];
-    this.viewState.runStatus = "idle";
-    this.viewState.focus = "transcript";
-    this.resetScrollOffsets();
-    this.viewState.latestModel = undefined;
-    this.activeRunId = undefined;
-    this.assistantBuffer = "";
+    this.clearViewState();
     for (const event of events) {
       this.applyEventToViewState(event);
     }
     this.flushAssistantTranscript();
+  }
+
+  private clearViewState(options: { preserveActiveRun?: boolean; preserveLatestModel?: boolean } = {}): void {
+    const activeRunId = this.activeRunId;
+    const runStatus = this.viewState.runStatus;
+    const latestModel = this.viewState.latestModel;
+    this.viewState.transcript = [];
+    this.viewState.activity = [];
+    this.viewState.todoItems = [];
+    this.viewState.runStatus = options.preserveActiveRun ? runStatus : "idle";
+    this.viewState.focus = "transcript";
+    this.resetScrollOffsets();
+    this.viewState.latestModel = options.preserveLatestModel ? latestModel : undefined;
+    this.activeRunId = options.preserveActiveRun ? activeRunId : undefined;
+    this.assistantBuffer = "";
   }
 
   private flushAssistantTranscript(): void {

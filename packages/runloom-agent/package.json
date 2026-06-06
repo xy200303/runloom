@@ -20,5 +20,8 @@
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
     "dev": "node ./dist/index.js"
+  },
+  "dependencies": {
+    "diff": "^9.0.0"
   }
 }

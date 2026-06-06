@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { promisify } from "node:util";
+import { FILE_HEADERS_ONLY, createTwoFilesPatch } from "diff";
 import type { CodeEditPlan, GitStatusSummary, RunloomDiffSummary, RunloomEditPlan, ToolDefinition, VerificationResult } from "../types.js";
 import {
   resolveExistingWorkspacePath,
@@ -465,27 +466,12 @@ async function walk(root: string, workspace: string, output: string[], maxEntrie
 }
 
 function createUnifiedDiff(before: string, after: string, filePath: string): string {
-  const beforeLines = before.split(/\r?\n/);
-  const afterLines = after.split(/\r?\n/);
-  const lines = [`--- a/${filePath}`, `+++ b/${filePath}`, "@@"];
-  const max = Math.max(beforeLines.length, afterLines.length);
-
-  for (let i = 0; i < max; i += 1) {
-    const beforeLine = beforeLines[i];
-    const afterLine = afterLines[i];
-    if (beforeLine === afterLine && beforeLine !== undefined) {
-      lines.push(` ${beforeLine}`);
-    } else {
-      if (beforeLine !== undefined) {
-        lines.push(`-${beforeLine}`);
-      }
-      if (afterLine !== undefined) {
-        lines.push(`+${afterLine}`);
-      }
-    }
-  }
-
-  return `${lines.join("\n")}\n`;
+  // Keep Runloom's boundary thin here: diff owns the algorithm, Runloom owns security and event records.
+  const patch = createTwoFilesPatch(`a/${filePath}`, `b/${filePath}`, before, after, undefined, undefined, {
+    context: 3,
+    headerOptions: FILE_HEADERS_ONLY
+  });
+  return patch.endsWith("\n") ? patch : `${patch}\n`;
 }
 
 function summarizePatch(patch: string, filePath: string): RunloomDiffSummary {

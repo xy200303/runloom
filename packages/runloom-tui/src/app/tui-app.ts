@@ -251,7 +251,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /focus <panel> Focus status, transcript, todo, or activity",
           "  /scroll <dir>  Scroll focused panel up, down, top, or bottom",
           "  /replay        Rebuild panels from stored events",
-          "  /permissions   Show approval policy",
+          "  /permissions   Show or update approval policy panel",
+          "  /permissions set <scope|default> <mode>",
           "  /approval      Show or update approval policy",
           "  /approval default <full_access|ask|auto_decide>",
           "  /approval <scope> <full_access|ask|auto_decide>",
@@ -293,9 +294,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
-    if (command === "/permissions") {
-      const policy = await this.options.agent.getApprovalPolicy();
-      output.write(formatApprovalPolicy(policy));
+    if (command === "/permissions" || command.startsWith("/permissions ")) {
+      await this.handlePermissionsCommand(command);
       return;
     }
 
@@ -342,9 +342,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
-    if (command === "/approvals") {
-      const approvals = await this.options.agent.listApprovals();
-      output.write(formatApprovals(approvals));
+    if (command === "/approvals" || command.startsWith("/approvals ")) {
+      await this.handleApprovalsCommand(command);
       return;
     }
 
@@ -693,7 +692,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     if (!target) {
       const policy = await this.options.agent.getApprovalPolicy();
-      output.write(formatApprovalPolicy(policy));
+      output.write(formatApprovalPolicyPanel(policy));
       output.write(formatApprovalCommandHelp());
       return;
     }
@@ -724,6 +723,87 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       }
     });
     output.write(`Approval mode for ${scope} set to ${mode}\n`);
+  }
+
+  private async handlePermissionsCommand(command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const [, action, target, modeText] = command.split(/\s+/);
+
+    if (!action) {
+      const policy = await this.options.agent.getApprovalPolicy();
+      output.write(formatApprovalPolicyPanel(policy));
+      output.write(formatPermissionsCommandHelp());
+      return;
+    }
+
+    if (action !== "set") {
+      output.write(`Unknown /permissions action: ${action}\n`);
+      output.write(formatPermissionsCommandHelp());
+      return;
+    }
+
+    const mode = parseApprovalMode(modeText);
+    if (!mode) {
+      output.write(`Invalid approval mode: ${modeText ?? "(missing)"}\n`);
+      output.write(formatPermissionsCommandHelp());
+      return;
+    }
+
+    if (target === "default") {
+      await this.options.agent.updateApprovalPolicy({ defaultMode: mode });
+      output.write(`Approval default mode set to ${mode}\n`);
+      return;
+    }
+
+    if (!target) {
+      output.write("Missing permission scope for /permissions set\n");
+      output.write(formatPermissionsCommandHelp());
+      return;
+    }
+
+    const scope = parsePermissionScope(target);
+    if (!scope) {
+      output.write(`Invalid permission scope: ${target}\n`);
+      output.write(formatScopeList());
+      return;
+    }
+
+    await this.options.agent.updateApprovalPolicy({
+      scopes: {
+        [scope]: mode
+      }
+    });
+    output.write(`Approval mode for ${scope} set to ${mode}\n`);
+  }
+
+  private async handleApprovalsCommand(command: string): Promise<void> {
+    const output = this.options.output ?? defaultOutput;
+    const [, action, approvalId] = command.split(/\s+/);
+    const approvals = await this.options.agent.listApprovals();
+
+    if (!action) {
+      output.write(formatApprovals(approvals));
+      return;
+    }
+
+    if (action !== "view") {
+      output.write(`Unknown /approvals action: ${action}\n`);
+      output.write(formatApprovalsCommandHelp());
+      return;
+    }
+
+    if (!approvalId) {
+      output.write("Missing approval id for /approvals view\n");
+      return;
+    }
+
+    const approval = approvals.find((item) => item.id === approvalId);
+    if (!approval) {
+      output.write(`Approval not found: ${approvalId}\n`);
+      return;
+    }
+
+    output.write(formatApprovalDetail(approval));
   }
 
   private async handleApprovalDecisionCommand(command: string): Promise<void> {
@@ -1106,6 +1186,27 @@ function formatApprovalPolicy(policy: ApprovalPolicyConfig): string {
   return `${lines.join("\n")}\n`;
 }
 
+function formatApprovalPolicyPanel(policy: ApprovalPolicyConfig): string {
+  const scopeWidth = Math.max("scope".length, ...PERMISSION_SCOPES.map((scope) => scope.length));
+  const modeWidth = Math.max("mode".length, ...APPROVAL_MODES.map((mode) => mode.length));
+  const lines = [
+    "Approval Policy:",
+    `  default: ${policy.defaultMode}`,
+    `  updated: ${policy.updatedAt} by ${policy.updatedBy}`,
+    `  ${"scope".padEnd(scopeWidth)}  ${"mode".padEnd(modeWidth)}  source`
+  ];
+
+  for (const scope of PERMISSION_SCOPES) {
+    const configuredMode = policy.scopes[scope];
+    const mode = configuredMode ?? policy.defaultMode;
+    const source = configuredMode ? "override" : "default";
+    lines.push(`  ${scope.padEnd(scopeWidth)}  ${mode.padEnd(modeWidth)}  ${source}`);
+  }
+
+  lines.push("  commands: /permissions set <scope|default> <full_access|ask|auto_decide>");
+  return `${lines.join("\n")}\n`;
+}
+
 function formatTools(tools: ToolSummary[]): string {
   if (tools.length === 0) {
     return "No tools registered.\n";
@@ -1122,12 +1223,34 @@ function formatApprovals(approvals: ApprovalRequest[]): string {
   if (approvals.length === 0) {
     return "Approvals: (none pending)\n";
   }
-  const lines = ["Approvals:"];
+  const lines = [`Approval Center: ${approvals.length} pending`];
   for (const approval of approvals) {
-    lines.push(
-      `  ${approval.id} run=${approval.runId} scope=${approval.scope} risk=${approval.risk} mode=${approval.mode} ${approval.summary}`
-    );
+    const expires = approval.expiresAt ? ` expires=${approval.expiresAt}` : "";
+    lines.push(`  ${approval.id} risk=${approval.risk} scope=${approval.scope} mode=${approval.mode}${expires}`);
+    lines.push(`    action=${approval.action} run=${approval.runId} session=${approval.sessionId}`);
+    lines.push(`    summary: ${approval.summary}`);
+    lines.push(`    commands: /approve ${approval.id} | /deny ${approval.id} | /approvals view ${approval.id}`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatApprovalDetail(approval: ApprovalRequest): string {
+  const lines = [
+    `Approval: ${approval.id}`,
+    `  action: ${approval.action}`,
+    `  scope: ${approval.scope}`,
+    `  risk: ${approval.risk}`,
+    `  mode: ${approval.mode}`,
+    `  run: ${approval.runId}`,
+    `  session: ${approval.sessionId}`,
+    `  summary: ${approval.summary}`
+  ];
+  if (approval.expiresAt) {
+    lines.push(`  expiresAt: ${approval.expiresAt}`);
+  }
+  lines.push("  details:");
+  lines.push(indentBlock(formatUnknownValue(approval.details), 4));
+  lines.push(`  commands: /approve ${approval.id} | /deny ${approval.id}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -1353,6 +1476,25 @@ function formatApprovalCommandHelp(): string {
   ].join("\n") + "\n";
 }
 
+function formatPermissionsCommandHelp(): string {
+  return [
+    "Usage:",
+    "  /permissions",
+    "  /permissions set default <full_access|ask|auto_decide>",
+    "  /permissions set <scope> <full_access|ask|auto_decide>"
+  ].join("\n") + "\n";
+}
+
+function formatApprovalsCommandHelp(): string {
+  return [
+    "Usage:",
+    "  /approvals",
+    "  /approvals view <approval-id>",
+    "  /approve <approval-id>",
+    "  /deny <approval-id>"
+  ].join("\n") + "\n";
+}
+
 function formatScopeList(): string {
   return `Scopes: ${PERMISSION_SCOPES.join(", ")}\n`;
 }
@@ -1427,4 +1569,26 @@ function truncateText(value: string, maxLength = 300): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function formatUnknownValue(value: unknown): string {
+  if (value === undefined) {
+    return "(none)";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function indentBlock(value: string, spaces: number): string {
+  const padding = " ".repeat(spaces);
+  return value
+    .split(/\r?\n/)
+    .map((line) => `${padding}${line}`)
+    .join("\n");
 }

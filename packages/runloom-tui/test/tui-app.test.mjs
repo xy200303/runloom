@@ -28,7 +28,10 @@ test("approval command updates scope and default modes", async () => {
       risk: "high",
       mode: "ask",
       summary: "Runloom wants to execute shell.verify.",
-      details: {}
+      details: {
+        command: "pnpm test",
+        cwd: process.cwd()
+      }
     }
   ];
   const sessions = [
@@ -304,7 +307,10 @@ test("approval command updates scope and default modes", async () => {
 
   await app.runCommand("/approval shell full_access");
   await app.runCommand("/approval default auto_decide");
+  await app.runCommand("/permissions");
+  await app.runCommand("/permissions set filesystem.write ask");
   await app.runCommand("/approvals");
+  await app.runCommand("/approvals view approval_test");
   await app.runCommand("/approve approval_test");
   await app.runCommand("/approvals");
   await app.runCommand("/tools");
@@ -461,11 +467,20 @@ test("approval command updates scope and default modes", async () => {
 
   const text = output.toString();
   assert.equal(policy.scopes.shell, "full_access");
+  assert.equal(policy.scopes["filesystem.write"], "ask");
   assert.equal(policy.defaultMode, "auto_decide");
   assert.equal(closed, true);
   assert.match(text, /Approval mode for shell set to full_access/);
   assert.match(text, /Approval default mode set to auto_decide/);
-  assert.match(text, /approval_test run=run_tool scope=shell risk=high mode=ask/);
+  assert.match(text, /Approval Policy:\n {2}default: auto_decide/);
+  assert.match(text, /filesystem\.write\s+auto_decide\s+default/);
+  assert.match(text, /Approval mode for filesystem\.write set to ask/);
+  assert.match(text, /Approval Center: 1 pending/);
+  assert.match(text, /approval_test risk=high scope=shell mode=ask/);
+  assert.match(text, /action=tool:shell\.verify run=run_tool session=ses_tool/);
+  assert.match(text, /commands: \/approve approval_test \| \/deny approval_test \| \/approvals view approval_test/);
+  assert.match(text, /Approval: approval_test/);
+  assert.match(text, /"command": "pnpm test"/);
   assert.match(text, /Approval approval_test approved/);
   assert.match(text, /Approvals: \(none pending\)/);
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);

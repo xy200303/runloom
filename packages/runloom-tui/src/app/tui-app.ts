@@ -38,6 +38,7 @@ type TuiShortcut =
   | "alt+1"
   | "alt+2"
   | "alt+3"
+  | "alt+4"
   | "n"
   | "p"
   | "v"
@@ -2109,7 +2110,7 @@ function formatActivityCommandHelp(): string {
 }
 
 function formatShortcutCommandHelp(): string {
-  return "Usage: /key <ctrl+l|tab|shift+tab|pgup|pgdn|home|end|alt+1|alt+2|alt+3|n|p|v|a|s|d> [deny-reason]\n";
+  return "Usage: /key <ctrl+l|tab|shift+tab|pgup|pgdn|home|end|alt+1|alt+2|alt+3|alt+4|n|p|v|a|s|d> [deny-reason]\n";
 }
 
 function parseActivityCategory(value: string): ActivityCategory | undefined {
@@ -2175,6 +2176,9 @@ function normalizeShortcut(value: string): TuiShortcut | undefined {
   if (normalized === "alt+3" || normalized === "option+3") {
     return "alt+3";
   }
+  if (normalized === "alt+4" || normalized === "option+4") {
+    return "alt+4";
+  }
   if (normalized === "n" || normalized === "next") {
     return "n";
   }
@@ -2218,6 +2222,8 @@ function formatShortcutLabel(shortcut: TuiShortcut): string {
       return "Alt+2";
     case "alt+3":
       return "Alt+3";
+    case "alt+4":
+      return "Alt+4";
     case "n":
       return "N";
     case "p":
@@ -2245,6 +2251,8 @@ function panelForShortcut(shortcut: TuiShortcut): TuiPanel | undefined {
       return "todo";
     case "alt+3":
       return "activity";
+    case "alt+4":
+      return "status";
     default:
       return undefined;
   }

@@ -29,6 +29,7 @@ type TuiPanel = "status" | "transcript" | "todo" | "activity";
 type ScrollAction = "up" | "down" | "top" | "bottom";
 type TuiShortcut =
   | "ctrl+l"
+  | "enter"
   | "tab"
   | "shift+tab"
   | "pgup"
@@ -722,6 +723,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
+    if (shortcut === "enter") {
+      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+      output.write(this.formatFocusedDefaultAction());
+      return;
+    }
+
     if (shortcut === "pgup" || shortcut === "pgdn") {
       const panel = this.viewState.focus;
       this.scrollPanel(panel, shortcut === "pgup" ? "up" : "down", DEFAULT_PANEL_LINES);
@@ -772,6 +779,13 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     const panel = FOCUS_PANELS[nextIndex] ?? "transcript";
     this.viewState.focus = panel;
     return panel;
+  }
+
+  private formatFocusedDefaultAction(): string {
+    if (this.viewState.focus === "activity") {
+      return this.formatActivityDetailCommand("current");
+    }
+    return this.formatPanel(this.viewState.focus);
   }
 
   private async handleApprovalShortcut(shortcut: ApprovalShortcut, args: string[]): Promise<void> {
@@ -2111,7 +2125,7 @@ function formatActivityCommandHelp(): string {
 }
 
 function formatShortcutCommandHelp(): string {
-  return "Usage: /key <ctrl+l|tab|shift+tab|pgup|pgdn|home|end|alt+1|alt+2|alt+3|alt+4|n|p|v|a|s|d> [deny-reason]\n";
+  return "Usage: /key <ctrl+l|enter|tab|shift+tab|pgup|pgdn|home|end|alt+1|alt+2|alt+3|alt+4|n|p|v|a|s|d> [deny-reason]\n";
 }
 
 function parseActivityCategory(value: string): ActivityCategory | undefined {
@@ -2149,6 +2163,9 @@ function normalizeShortcut(value: string): TuiShortcut | undefined {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "");
   if (normalized === "ctrl+l" || normalized === "control+l") {
     return "ctrl+l";
+  }
+  if (normalized === "enter" || normalized === "return") {
+    return "enter";
   }
   if (normalized === "tab") {
     return "tab";
@@ -2205,6 +2222,8 @@ function formatShortcutLabel(shortcut: TuiShortcut): string {
   switch (shortcut) {
     case "ctrl+l":
       return "Ctrl+L";
+    case "enter":
+      return "Enter";
     case "tab":
       return "Tab";
     case "shift+tab":

@@ -97,6 +97,12 @@ Runloom loop
 
 ## Codex Adapter
 
+当前首期已提供 `createCodexExternalAgentAdapter(...)` public helper，用于生成可注册到
+`RunloomAgent.registerExternalAgent(...)` 的 Codex CLI adapter descriptor。该 helper 只声明
+`local_cli` adapter 的 name、command、capabilities、status 和 maxTurns，供 TUI/Web/VSCode
+等 host 展示和配置使用；实际 delegate 执行、stdout/stderr 捕获、patch 复核和 approval/audit
+衔接仍按下列职责继续实现。
+
 Codex adapter 的职责：
 
 - 以子进程、API 或本地服务方式启动 Codex。

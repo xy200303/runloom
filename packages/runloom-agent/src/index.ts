@@ -6,6 +6,7 @@ export async function createRunloomAgent(options: CreateRunloomAgentOptions): Pr
 }
 
 export { APPROVAL_MODES, PERMISSION_SCOPES } from "./approvals/policy.js";
+export { createCodexExternalAgentAdapter } from "./external-agents/codex-adapter.js";
 export {
   ApprovalError,
   EvolutionError,
@@ -24,6 +25,7 @@ export type { AnthropicMessagesProviderOptions } from "./providers/anthropic-mes
 export type { GoogleGeminiProviderOptions } from "./providers/google-gemini-provider.js";
 export type { OpenAIResponsesProviderOptions } from "./providers/openai-responses-provider.js";
 export type { OpenAIChatCompletionsProviderOptions } from "./providers/openai-chat-completions-provider.js";
+export type { CodexExternalAgentAdapterOptions } from "./external-agents/codex-adapter.js";
 export type {
   ApprovalBridge,
   ApprovalDecision,

@@ -119,6 +119,8 @@ export interface RunloomAgent {
 - `RuntimeError`
 - `EvolutionError`
 - `ExternalAgentAdapter`
+- `CodexExternalAgentAdapterOptions`
+- `createCodexExternalAgentAdapter`
 - `SkillManifest`
 - `McpServerConfig`
 - `A2APeerConfig`

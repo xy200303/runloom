@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createCodexExternalAgentAdapter, createRunloomAgent } from "../src/index.js";
+import {
+  createClaudeCodeExternalAgentAdapter,
+  createCodexExternalAgentAdapter,
+  createRunloomAgent
+} from "../src/index.js";
 
 describe("external agent adapters", () => {
   it("creates a default Codex CLI adapter descriptor", () => {
@@ -13,6 +17,23 @@ describe("external agent adapters", () => {
       status: "available",
       capabilities: ["code_review", "edit"],
       command: "codex",
+      maxTurns: 3,
+      error: undefined
+    });
+    expect(adapter.delegate).toBeUndefined();
+  });
+
+  it("creates a default Claude Code CLI adapter descriptor", () => {
+    const adapter = createClaudeCodeExternalAgentAdapter();
+
+    expect(adapter).toEqual({
+      name: "claude-code",
+      description: "Claude Code CLI",
+      kind: "local_cli",
+      enabled: true,
+      status: "available",
+      capabilities: ["code_review", "edit"],
+      command: "claude",
       maxTurns: 3,
       error: undefined
     });
@@ -46,7 +67,7 @@ describe("external agent adapters", () => {
     });
   });
 
-  it("registers the Codex adapter through the public agent API", async () => {
+  it("registers local CLI adapters through the public agent API", async () => {
     const agent = await createRunloomAgent({
       provider: "openai-responses",
       model: "gpt-4.1",
@@ -56,9 +77,21 @@ describe("external agent adapters", () => {
 
     try {
       await agent.registerExternalAgent(createCodexExternalAgentAdapter({ maxTurns: 2 }));
+      await agent.registerExternalAgent(createClaudeCodeExternalAgentAdapter({ status: "unavailable" }));
 
       const agents = await agent.listExternalAgents();
       expect(agents).toEqual([
+        {
+          name: "claude-code",
+          description: "Claude Code CLI",
+          kind: "local_cli",
+          enabled: true,
+          status: "unavailable",
+          capabilities: ["code_review", "edit"],
+          command: "claude",
+          maxTurns: 3,
+          error: undefined
+        },
         {
           name: "codex",
           description: "Codex CLI",

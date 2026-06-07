@@ -120,6 +120,11 @@ Codex adapter 的职责：
 
 ## Claude Code Adapter
 
+当前首期已提供 `createClaudeCodeExternalAgentAdapter(...)` public helper，用于生成可注册到
+`RunloomAgent.registerExternalAgent(...)` 的 Claude Code CLI adapter descriptor。该 helper 只声明
+`local_cli` adapter 的 name、command、capabilities、status 和 maxTurns，供 host 展示和配置；
+实际 session 创建、权限请求映射、transcript 捕获和结果复核仍按下列职责继续实现。
+
 Claude Code adapter 的职责与 Codex 类似，但需要适配其 CLI/session 行为：
 
 - 创建隔离 session。

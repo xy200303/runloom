@@ -119,6 +119,8 @@ export interface RunloomAgent {
 - `RuntimeError`
 - `EvolutionError`
 - `ExternalAgentAdapter`
+- `ClaudeCodeExternalAgentAdapterOptions`
+- `createClaudeCodeExternalAgentAdapter`
 - `CodexExternalAgentAdapterOptions`
 - `createCodexExternalAgentAdapter`
 - `SkillManifest`

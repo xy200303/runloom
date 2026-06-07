@@ -178,7 +178,7 @@
 
 - [x] `ExternalAgentAdapter` 接口：已定义 public adapter/summary/delegation 类型、register/list API、TUI `/external` 真实注册状态展示和 `external_agent.*` activity 过滤展示；委托执行仍待实现。
 - [~] Codex adapter：已提供 `createCodexExternalAgentAdapter(...)` public descriptor factory，支持 host 注册 Codex CLI adapter；委托执行仍待实现。
-- [ ] Claude Code adapter。
+- [~] Claude Code adapter：已提供 `createClaudeCodeExternalAgentAdapter(...)` public descriptor factory，支持 host 注册 Claude Code CLI adapter；委托执行仍待实现。
 - [ ] 其他本地 coding agent adapter 扩展点。
 - [ ] 外部委托的 workspace、权限、最大轮数、输出格式限制。
 - [ ] 委托事件、日志和 audit trail。

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { FileApprovalPolicyStore } from "../approvals/file-policy-store.js";
-import { applyApprovalPolicyPatch, createDefaultApprovalPolicy } from "../approvals/policy.js";
+import { applyApprovalPolicyPatch, createDefaultApprovalPolicy, getApprovalMode } from "../approvals/policy.js";
 import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-summary.js";
 import { loadRunloomConfig, selectModel } from "../config/runloom-config.js";
 import { ApprovalError, ProviderError, RuntimeError, ToolError } from "../errors.js";
@@ -694,6 +694,11 @@ export class DefaultRunloomAgent implements RunloomAgent {
       );
     }
 
+    const approvalResult = this.checkExternalAgentDelegationApproval(name, adapter, normalizedRequest, runId, sessionId);
+    if (approvalResult) {
+      return approvalResult;
+    }
+
     try {
       const result = await adapter.delegate(cloneExternalAgentDelegationRequest(normalizedRequest));
       const safeResult = redactValue(cloneExternalAgentDelegationResult(result), { workspace: this.workspace });
@@ -751,10 +756,126 @@ export class DefaultRunloomAgent implements RunloomAgent {
       workspace: resolveWorkspacePath(this.workspace, request.workspace || "."),
       runId: request.runId,
       sessionId: request.sessionId,
+      approvalId: request.approvalId,
       maxTurns: Math.min(requestedMaxTurns, adapterMaxTurns),
       constraints: request.constraints ? [...request.constraints] : undefined,
       context: request.context ? request.context.map((item) => ({ ...item })) : undefined
     };
+  }
+
+  private checkExternalAgentDelegationApproval(
+    name: string,
+    adapter: ExternalAgentAdapter,
+    request: ExternalAgentDelegationRequest,
+    runId: string,
+    sessionId: string
+  ): ExternalAgentDelegationResult | undefined {
+    const mode = getApprovalMode(this.approvalPolicy, "external_agents");
+    const risk: ApprovalRequest["risk"] = "high";
+
+    if (request.approvalId) {
+      const decision = this.store.getApprovalDecision(request.approvalId);
+      if (!decision) {
+        return {
+          status: "waiting_approval",
+          summary: `External agent delegation is waiting for approval: ${name}`,
+          approvalId: request.approvalId
+        };
+      }
+      if (decision.decision === "denied") {
+        return this.cancelExternalAgentDelegationAfterDeniedApproval(name, request, runId, sessionId);
+      }
+      this.emit("external_agent.approved", "external_agent", runId, sessionId, {
+        name,
+        approvalId: request.approvalId
+      });
+      return undefined;
+    }
+
+    if (!requiresExternalAgentApproval(mode, risk)) {
+      return undefined;
+    }
+
+    const approval: ApprovalRequest = {
+      id: `approval_${randomUUID()}`,
+      runId,
+      sessionId,
+      scope: "external_agents",
+      action: `external_agent:${name}`,
+      risk,
+      mode,
+      summary: `Runloom wants to delegate to external agent ${name}.`,
+      details: {
+        name,
+        kind: adapter.kind,
+        task: request.task,
+        workspace: request.workspace,
+        maxTurns: request.maxTurns,
+        constraints: request.constraints,
+        contextItems: request.context?.length ?? 0
+      }
+    };
+
+    this.store.saveApproval(approval);
+    this.emit("approval.requested", "approval", runId, sessionId, approval);
+    this.emit("external_agent.approval_requested", "external_agent", runId, sessionId, {
+      name,
+      approvalId: approval.id,
+      mode,
+      risk
+    });
+    this.recordAudit({
+      action: "external_agent.approval_requested",
+      actor: "runtime",
+      summary: `External agent delegation approval requested: ${name}`,
+      runId,
+      sessionId,
+      details: {
+        name,
+        approvalId: approval.id,
+        mode,
+        risk,
+        maxTurns: request.maxTurns
+      }
+    });
+    return {
+      status: "waiting_approval",
+      summary: `External agent delegation is waiting for approval: ${name}`,
+      approvalId: approval.id
+    };
+  }
+
+  private cancelExternalAgentDelegationAfterDeniedApproval(
+    name: string,
+    request: ExternalAgentDelegationRequest,
+    runId: string,
+    sessionId: string
+  ): ExternalAgentDelegationResult {
+    const result: ExternalAgentDelegationResult = {
+      status: "cancelled",
+      summary: `External agent delegation denied: ${name}`,
+      approvalId: request.approvalId,
+      diagnostics: [`External agent delegation denied: ${name}`]
+    };
+    this.emit("external_agent.failed", "external_agent", runId, sessionId, {
+      name,
+      approvalId: request.approvalId,
+      result
+    });
+    this.recordAudit({
+      action: "external_agent.delegated",
+      actor: "runtime",
+      summary: `External agent delegation denied: ${name}`,
+      runId,
+      sessionId,
+      details: {
+        name,
+        status: "cancelled",
+        approvalId: request.approvalId,
+        maxTurns: request.maxTurns
+      }
+    });
+    return result;
   }
 
   private failExternalAgentDelegation(
@@ -2562,6 +2683,16 @@ function normalizeExternalAgentMaxTurns(value: number | undefined): number {
     return 3;
   }
   return Math.max(1, Math.floor(value));
+}
+
+function requiresExternalAgentApproval(mode: ApprovalRequest["mode"], risk: ApprovalRequest["risk"]): boolean {
+  if (mode === "full_access") {
+    return false;
+  }
+  if (mode === "ask") {
+    return true;
+  }
+  return risk === "high" || risk === "critical";
 }
 
 function cloneExternalAgentDelegationRequest(

@@ -350,14 +350,16 @@ export interface ExternalAgentDelegationRequest {
   workspace: string;
   sessionId?: string;
   runId?: string;
+  approvalId?: string;
   maxTurns?: number;
   constraints?: string[];
   context?: ExternalAgentContextItem[];
 }
 
 export interface ExternalAgentDelegationResult {
-  status: "completed" | "failed" | "cancelled";
+  status: "completed" | "failed" | "cancelled" | "waiting_approval";
   summary: string;
+  approvalId?: string;
   outputText?: string;
   events?: RunloomEvent[];
   diagnostics?: string[];

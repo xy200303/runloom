@@ -99,7 +99,12 @@ describe("external agent adapters", () => {
       provider: "openai-responses",
       model: "gpt-4.1",
       workspace: process.cwd(),
-      apiKey: ""
+      apiKey: "",
+      approvalPolicy: {
+        scopes: {
+          external_agents: "full_access"
+        }
+      }
     });
 
     try {
@@ -141,7 +146,12 @@ describe("external agent adapters", () => {
       provider: "openai-responses",
       model: "gpt-4.1",
       workspace: process.cwd(),
-      apiKey: ""
+      apiKey: "",
+      approvalPolicy: {
+        scopes: {
+          external_agents: "full_access"
+        }
+      }
     });
     const eventTypes: string[] = [];
     let receivedRequest: unknown;
@@ -209,6 +219,72 @@ describe("external agent adapters", () => {
         status: "completed",
         maxTurns: 2
       });
+    } finally {
+      await agent.close();
+    }
+  });
+
+  it("requests approval before delegating to external agents by default", async () => {
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: ""
+    });
+    const eventTypes: string[] = [];
+    let delegateCalls = 0;
+    agent.subscribe((event) => eventTypes.push(event.type));
+
+    try {
+      await agent.registerExternalAgent({
+        name: "approval-agent",
+        description: "Approval gated external agent",
+        kind: "local_cli",
+        enabled: true,
+        status: "available",
+        command: "approval-agent",
+        async delegate() {
+          delegateCalls += 1;
+          return {
+            status: "completed",
+            summary: "Approved delegation complete."
+          };
+        }
+      });
+
+      const request = {
+        task: "Review the current change",
+        workspace: ".",
+        runId: "run_external_approval",
+        sessionId: "ses_external_approval"
+      };
+      const waiting = await agent.delegateExternalAgent("approval-agent", request);
+      const approvals = await agent.listApprovals();
+
+      expect(waiting.status).toBe("waiting_approval");
+      expect(waiting.approvalId).toBeTruthy();
+      expect(delegateCalls).toBe(0);
+      expect(approvals[0]).toMatchObject({
+        id: waiting.approvalId,
+        scope: "external_agents",
+        action: "external_agent:approval-agent",
+        risk: "high",
+        mode: "ask"
+      });
+      expect(eventTypes).toContain("approval.requested");
+      expect(eventTypes).toContain("external_agent.approval_requested");
+
+      await agent.resolveApproval(waiting.approvalId ?? "", { decision: "approved" });
+      const completed = await agent.delegateExternalAgent("approval-agent", {
+        ...request,
+        approvalId: waiting.approvalId
+      });
+
+      expect(completed.status).toBe("completed");
+      expect(delegateCalls).toBe(1);
+      expect(eventTypes).toContain("approval.resolved");
+      expect(eventTypes).toContain("external_agent.approved");
+      expect(eventTypes).toContain("external_agent.completed");
     } finally {
       await agent.close();
     }

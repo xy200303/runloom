@@ -60,7 +60,8 @@ export interface RunloomAgent {
   getApprovalPolicy(): Promise<ApprovalPolicyConfig>;
   updateApprovalPolicy(patch: ApprovalPolicyPatch): Promise<ApprovalPolicyConfig>;
   listA2APeers(): Promise<A2APeerSummary[]>;
-  registerA2APeer(peer: A2APeerSummary): Promise<void>;
+  registerA2APeer(peer: A2APeerRegistration): Promise<void>;
+  delegateA2APeer(peerId: string, request: A2ADelegationRequest): Promise<A2ADelegationResult>;
   listExternalAgents(): Promise<ExternalAgentSummary[]>;
   registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void>;
   delegateExternalAgent(name: string, request: ExternalAgentDelegationRequest): Promise<ExternalAgentDelegationResult>;
@@ -124,6 +125,9 @@ export interface RunloomAgent {
 - `RuntimeError`
 - `EvolutionError`
 - `A2ACapabilitySummary`
+- `A2ADelegationRequest`
+- `A2ADelegationResult`
+- `A2APeerRegistration`
 - `A2APeerStatus`
 - `A2APeerSummary`
 - `A2APeerTransport`

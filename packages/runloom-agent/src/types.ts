@@ -426,6 +426,31 @@ export interface A2APeerSummary {
   error?: string;
 }
 
+export interface A2ADelegationRequest {
+  task: string;
+  workspace: string;
+  sessionId?: string;
+  runId?: string;
+  approvalId?: string;
+  capability?: string;
+  constraints?: string[];
+  context?: ExternalAgentContextItem[];
+}
+
+export interface A2ADelegationResult {
+  status: "completed" | "failed" | "cancelled" | "waiting_approval";
+  summary: string;
+  approvalId?: string;
+  outputText?: string;
+  structuredOutput?: unknown;
+  events?: RunloomEvent[];
+  diagnostics?: string[];
+}
+
+export interface A2APeerRegistration extends A2APeerSummary {
+  delegate?: (request: A2ADelegationRequest) => Promise<A2ADelegationResult>;
+}
+
 export interface McpServerSummary {
   name: string;
   enabled: boolean;
@@ -1103,7 +1128,8 @@ export interface RunloomAgent {
   listMcpServers(): Promise<McpServerSummary[]>;
   registerMcpServer(server: McpServerSummary): Promise<void>;
   listA2APeers(): Promise<A2APeerSummary[]>;
-  registerA2APeer(peer: A2APeerSummary): Promise<void>;
+  registerA2APeer(peer: A2APeerRegistration): Promise<void>;
+  delegateA2APeer(peerId: string, request: A2ADelegationRequest): Promise<A2ADelegationResult>;
   listExternalAgents(): Promise<ExternalAgentSummary[]>;
   registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void>;
   delegateExternalAgent(name: string, request: ExternalAgentDelegationRequest): Promise<ExternalAgentDelegationResult>;

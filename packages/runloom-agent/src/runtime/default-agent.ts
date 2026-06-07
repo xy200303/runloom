@@ -32,6 +32,7 @@ import type {
   ApprovalPolicyConfig,
   ApprovalPolicyPatch,
   ApprovalRequest,
+  A2APeerSummary,
   CreateRunloomMcpServerOptions,
   CreateRunloomSkillProposalInput,
   CreateRunloomSkillProposalOptions,
@@ -155,6 +156,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly tools = new Map<string, ToolDefinition>();
   private readonly skills = new Map<string, RunloomSkillSummary>();
   private readonly mcpServers = new Map<string, McpServerSummary>();
+  private readonly a2aPeers = new Map<string, A2APeerSummary>();
   private readonly externalAgents = new Map<string, ExternalAgentAdapter>();
   private readonly mcpServerConfigs = new Map<string, McpServerConfig>();
   private readonly discoveredMcpServers = new Set<string>();
@@ -628,6 +630,18 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async registerMcpServer(server: McpServerSummary): Promise<void> {
     this.mcpServers.set(server.name, cloneMcpServer(server));
+  }
+
+  async listA2APeers(): Promise<A2APeerSummary[]> {
+    return [...this.a2aPeers.values()]
+      .map(cloneA2APeer)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async registerA2APeer(peer: A2APeerSummary): Promise<void> {
+    const cloned = cloneA2APeer(peer);
+    this.a2aPeers.set(cloned.id, cloned);
+    this.emit("a2a.peer.discovered", "a2a", "a2a", "global", cloned);
   }
 
   async listExternalAgents(): Promise<ExternalAgentSummary[]> {
@@ -2666,6 +2680,19 @@ function cloneMcpServer(server: McpServerSummary): McpServerSummary {
     ...server,
     tools: server.tools ? [...server.tools] : undefined,
     permissions: server.permissions ? cloneMcpPermissions(server.permissions) : undefined
+  };
+}
+
+function cloneA2APeer(peer: A2APeerSummary): A2APeerSummary {
+  return {
+    ...peer,
+    capabilities: peer.capabilities
+      ? peer.capabilities.map((capability) => ({
+          ...capability,
+          inputSchema: capability.inputSchema ? { ...capability.inputSchema } : undefined,
+          outputSchema: capability.outputSchema ? { ...capability.outputSchema } : undefined
+        }))
+      : undefined
   };
 }
 

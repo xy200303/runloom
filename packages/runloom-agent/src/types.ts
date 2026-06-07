@@ -403,6 +403,29 @@ export interface ExternalAgentSummary {
   error?: string;
 }
 
+export type A2APeerTransport = "http" | "stdio" | "sse" | "custom";
+
+export type A2APeerStatus = "disabled" | "available" | "unavailable" | "error";
+
+export interface A2ACapabilitySummary {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+}
+
+export interface A2APeerSummary {
+  id: string;
+  name: string;
+  version?: string;
+  endpoint?: string;
+  transport?: A2APeerTransport;
+  enabled: boolean;
+  status: A2APeerStatus;
+  capabilities?: A2ACapabilitySummary[];
+  error?: string;
+}
+
 export interface McpServerSummary {
   name: string;
   enabled: boolean;
@@ -1079,6 +1102,8 @@ export interface RunloomAgent {
   approveSkillProposal(proposalId: string, decision?: ApprovalDecision): Promise<RunloomSkillProposal>;
   listMcpServers(): Promise<McpServerSummary[]>;
   registerMcpServer(server: McpServerSummary): Promise<void>;
+  listA2APeers(): Promise<A2APeerSummary[]>;
+  registerA2APeer(peer: A2APeerSummary): Promise<void>;
   listExternalAgents(): Promise<ExternalAgentSummary[]>;
   registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void>;
   delegateExternalAgent(name: string, request: ExternalAgentDelegationRequest): Promise<ExternalAgentDelegationResult>;

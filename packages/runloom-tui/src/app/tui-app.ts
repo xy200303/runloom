@@ -3,24 +3,20 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
 import type {
   ApprovalPolicyConfig,
-  ApprovalRequest,
   RunloomAgent,
   RunloomEvent,
   RunloomTodoItem,
   ToolExecutionResult,
   Unsubscribe
 } from "runloom-agent";
+import { TuiApprovalCommandController } from "./approval-commands.js";
 import {
   isApprovalShortcut,
   isScrollAction,
-  isSelectedApprovalTarget,
   normalizeShortcut,
   panelForShortcut,
   parseActivityCategory,
-  parseApprovalDecisionCommand,
-  parseApprovalMode,
   parsePanel,
-  parsePermissionScope,
   parseScrollAmount,
   parseVerificationCommand
 } from "./command-parsers.js";
@@ -33,7 +29,6 @@ import {
   truncateText,
   visibleSlice,
   type ActivityCategory,
-  type ApprovalShortcut,
   type ScrollAction,
   type TuiActivityRecord,
   type TuiPanel,
@@ -46,16 +41,9 @@ import {
   formatActivityCommandHelp,
   formatActivityDetail,
   formatActivityView,
-  formatApprovalCommandHelp,
-  formatApprovalDecision,
-  formatApprovalDecisionCommandHelp,
-  formatApprovalDetail,
   formatApprovalPolicy,
-  formatApprovalPolicyPanel,
   formatApprovalRequest,
   formatApprovalResolution,
-  formatApprovals,
-  formatApprovalsCommandHelp,
   formatCompositeView,
   formatCurrentSession,
   formatDiffActivity,
@@ -67,9 +55,7 @@ import {
   formatMcpServers,
   formatModelCommandHelp,
   formatModelSelection,
-  formatPermissionsCommandHelp,
   formatReviewFindings,
-  formatScopeList,
   formatScrollCommandHelp,
   formatSessionCommandHelp,
   formatSessions,
@@ -116,8 +102,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private activeLanguage?: string;
   private activeRunId?: string;
   private activeSessionId?: string;
-  private focusedApprovalId?: string;
   private assistantBuffer = "";
+  private readonly approvalCommands: TuiApprovalCommandController;
   private readonly viewState: TuiViewState = {
     transcript: [],
     activity: [],
@@ -130,7 +116,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     todoScrollOffset: 0
   };
 
-  constructor(private readonly options: CreateRunloomTuiAppOptions) {}
+  constructor(private readonly options: CreateRunloomTuiAppOptions) {
+    this.approvalCommands = new TuiApprovalCommandController({
+      agent: options.agent,
+      output: options.output ?? defaultOutput
+    });
+  }
 
   async start(): Promise<void> {
     const input = this.options.input ?? defaultInput;
@@ -339,7 +330,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/permissions" || command.startsWith("/permissions ")) {
-      await this.handlePermissionsCommand(command);
+      await this.approvalCommands.handlePermissionsCommand(command);
       return;
     }
 
@@ -398,12 +389,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/approvals" || command.startsWith("/approvals ")) {
-      await this.handleApprovalsCommand(command);
+      await this.approvalCommands.handleApprovalsCommand(command);
       return;
     }
 
     if (command.startsWith("/approve") || command.startsWith("/deny")) {
-      await this.handleApprovalDecisionCommand(command);
+      await this.approvalCommands.handleApprovalDecisionCommand(command);
       return;
     }
 
@@ -478,7 +469,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command.startsWith("/approval")) {
-      await this.handleApprovalCommand(command);
+      await this.approvalCommands.handleApprovalCommand(command);
       return;
     }
 
@@ -740,7 +731,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (shortcut === "esc") {
-      this.focusedApprovalId = undefined;
+      this.approvalCommands.clearFocus();
       this.viewState.focus = "transcript";
       output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
       output.write("Focus set to transcript\n");
@@ -780,7 +771,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     if (isApprovalShortcut(shortcut)) {
       output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      await this.handleApprovalShortcut(shortcut, shortcutArgs);
+      await this.approvalCommands.handleShortcut(shortcut, shortcutArgs);
       return;
     }
 
@@ -811,30 +802,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return this.formatActivityDetailCommand("current");
     }
     return this.formatPanel(this.viewState.focus);
-  }
-
-  private async handleApprovalShortcut(shortcut: ApprovalShortcut, args: string[]): Promise<void> {
-    if (shortcut === "n") {
-      await this.handleApprovalsCommand("/approvals next");
-      return;
-    }
-    if (shortcut === "p") {
-      await this.handleApprovalsCommand("/approvals prev");
-      return;
-    }
-    if (shortcut === "v") {
-      await this.handleApprovalsCommand("/approvals view selected");
-      return;
-    }
-    if (shortcut === "a") {
-      await this.handleApprovalDecisionCommand("/approve selected once");
-      return;
-    }
-    if (shortcut === "s") {
-      await this.handleApprovalDecisionCommand("/approve selected session");
-      return;
-    }
-    await this.handleApprovalDecisionCommand(`/deny selected ${args.join(" ")}`.trimEnd());
   }
 
   private scrollPanel(panel: TuiPanel, action: ScrollAction, amount: number): void {
@@ -1002,210 +969,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private trackToolSession(result: ToolExecutionResult): void {
     this.activeRunId = result.runId;
     this.activeSessionId = result.sessionId;
-  }
-
-  private async handleApprovalCommand(command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const [, target, modeText] = command.split(/\s+/);
-
-    if (!target) {
-      const policy = await this.options.agent.getApprovalPolicy();
-      output.write(formatApprovalPolicyPanel(policy));
-      output.write(formatApprovalCommandHelp());
-      return;
-    }
-
-    const mode = parseApprovalMode(modeText);
-    if (!mode) {
-      output.write(`Invalid approval mode: ${modeText ?? "(missing)"}\n`);
-      output.write(formatApprovalCommandHelp());
-      return;
-    }
-
-    if (target === "default") {
-      await this.options.agent.updateApprovalPolicy({ defaultMode: mode });
-      output.write(`Approval default mode set to ${mode}\n`);
-      return;
-    }
-
-    const scope = parsePermissionScope(target);
-    if (!scope) {
-      output.write(`Invalid permission scope: ${target}\n`);
-      output.write(formatScopeList());
-      return;
-    }
-
-    await this.options.agent.updateApprovalPolicy({
-      scopes: {
-        [scope]: mode
-      }
-    });
-    output.write(`Approval mode for ${scope} set to ${mode}\n`);
-  }
-
-  private async handlePermissionsCommand(command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const [, action, target, modeText] = command.split(/\s+/);
-
-    if (!action) {
-      const policy = await this.options.agent.getApprovalPolicy();
-      output.write(formatApprovalPolicyPanel(policy));
-      output.write(formatPermissionsCommandHelp());
-      return;
-    }
-
-    if (action !== "set") {
-      output.write(`Unknown /permissions action: ${action}\n`);
-      output.write(formatPermissionsCommandHelp());
-      return;
-    }
-
-    const mode = parseApprovalMode(modeText);
-    if (!mode) {
-      output.write(`Invalid approval mode: ${modeText ?? "(missing)"}\n`);
-      output.write(formatPermissionsCommandHelp());
-      return;
-    }
-
-    if (target === "default") {
-      await this.options.agent.updateApprovalPolicy({ defaultMode: mode });
-      output.write(`Approval default mode set to ${mode}\n`);
-      return;
-    }
-
-    if (!target) {
-      output.write("Missing permission scope for /permissions set\n");
-      output.write(formatPermissionsCommandHelp());
-      return;
-    }
-
-    const scope = parsePermissionScope(target);
-    if (!scope) {
-      output.write(`Invalid permission scope: ${target}\n`);
-      output.write(formatScopeList());
-      return;
-    }
-
-    await this.options.agent.updateApprovalPolicy({
-      scopes: {
-        [scope]: mode
-      }
-    });
-    output.write(`Approval mode for ${scope} set to ${mode}\n`);
-  }
-
-  private async handleApprovalsCommand(command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const [, action, approvalId] = command.split(/\s+/);
-    const approvals = await this.options.agent.listApprovals();
-
-    if (!action) {
-      const focusedApprovalId = this.syncFocusedApproval(approvals);
-      output.write(formatApprovals(approvals, focusedApprovalId));
-      return;
-    }
-
-    if (action === "next" || action === "prev") {
-      const focusedApprovalId = this.moveFocusedApproval(approvals, action === "next" ? 1 : -1);
-      if (!focusedApprovalId) {
-        output.write("Approvals: (none pending)\n");
-        return;
-      }
-      output.write(`Approval focus set to ${focusedApprovalId}\n`);
-      output.write(formatApprovals(approvals, focusedApprovalId));
-      return;
-    }
-
-    if (action !== "view" && action !== "focus") {
-      output.write(`Unknown /approvals action: ${action}\n`);
-      output.write(formatApprovalsCommandHelp());
-      return;
-    }
-
-    const targetApprovalId = approvalId
-      ? this.resolveApprovalTargetId(approvalId, approvals)
-      : this.syncFocusedApproval(approvals);
-    if (!targetApprovalId) {
-      output.write("No approval selected\n");
-      return;
-    }
-
-    const approval = approvals.find((item) => item.id === targetApprovalId);
-    if (!approval) {
-      output.write(`Approval not found: ${targetApprovalId}\n`);
-      return;
-    }
-
-    this.focusedApprovalId = approval.id;
-    if (action === "focus") {
-      output.write(`Approval focus set to ${approval.id}\n`);
-    }
-    output.write(formatApprovalDetail(approval));
-  }
-
-  private async handleApprovalDecisionCommand(command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const [action, approvalTarget, ...rest] = command.split(/\s+/);
-    if (!approvalTarget) {
-      output.write(`Missing approval id for ${action}\n`);
-      return;
-    }
-    const approvals = await this.options.agent.listApprovals();
-    const approvalId = this.resolveApprovalTargetId(approvalTarget, approvals);
-    if (!approvalId) {
-      output.write("No approval selected\n");
-      return;
-    }
-    const parsedDecision = parseApprovalDecisionCommand(action, rest);
-    if ("error" in parsedDecision) {
-      output.write(`${parsedDecision.error}\n`);
-      output.write(formatApprovalDecisionCommandHelp());
-      return;
-    }
-
-    try {
-      await this.options.agent.resolveApproval(approvalId, parsedDecision.decision);
-      output.write(`Approval ${approvalId} ${formatApprovalDecision(parsedDecision.decision)}\n`);
-      const remainingApprovals = await this.options.agent.listApprovals();
-      const focusedApprovalId = this.syncFocusedApproval(remainingApprovals);
-      if (focusedApprovalId) {
-        output.write(`Approval focus set to ${focusedApprovalId}\n`);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      output.write(`Approval decision failed: ${message}\n`);
-    }
-  }
-
-  private syncFocusedApproval(approvals: ApprovalRequest[]): string | undefined {
-    if (approvals.length === 0) {
-      this.focusedApprovalId = undefined;
-      return undefined;
-    }
-    if (!this.focusedApprovalId || !approvals.some((approval) => approval.id === this.focusedApprovalId)) {
-      this.focusedApprovalId = approvals[0]?.id;
-    }
-    return this.focusedApprovalId;
-  }
-
-  private moveFocusedApproval(approvals: ApprovalRequest[], direction: 1 | -1): string | undefined {
-    if (approvals.length === 0) {
-      this.focusedApprovalId = undefined;
-      return undefined;
-    }
-    const currentIndex = approvals.findIndex((approval) => approval.id === this.focusedApprovalId);
-    const nextIndex = currentIndex === -1
-      ? (direction === 1 ? 0 : approvals.length - 1)
-      : (currentIndex + direction + approvals.length) % approvals.length;
-    this.focusedApprovalId = approvals[nextIndex]?.id;
-    return this.focusedApprovalId;
-  }
-
-  private resolveApprovalTargetId(target: string, approvals: ApprovalRequest[]): string | undefined {
-    if (isSelectedApprovalTarget(target)) {
-      return this.syncFocusedApproval(approvals);
-    }
-    return target;
   }
 
   private handleModelCommand(command: string): void {

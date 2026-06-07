@@ -142,6 +142,9 @@ Runloom 仍然是主控者：
 ## 其他本地 Coding Agent Adapter
 
 Runloom 应保留通用 adapter 扩展点，用于接入其他本地 coding agent、团队内部 specialist agent 或服务化开发助手。
+当前首期已提供 `createLocalCliExternalAgentAdapter(...)` public helper，用于生成任意 `local_cli`
+external agent descriptor；host 仍负责确认命令可用性、展示状态，并在后续 delegate 执行接入
+approval/audit 前决定是否启用。
 
 通用要求：
 

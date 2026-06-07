@@ -123,6 +123,8 @@ export interface RunloomAgent {
 - `createClaudeCodeExternalAgentAdapter`
 - `CodexExternalAgentAdapterOptions`
 - `createCodexExternalAgentAdapter`
+- `LocalCliExternalAgentAdapterOptions`
+- `createLocalCliExternalAgentAdapter`
 - `SkillManifest`
 - `McpServerConfig`
 - `A2APeerConfig`

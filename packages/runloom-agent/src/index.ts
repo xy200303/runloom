@@ -8,6 +8,7 @@ export async function createRunloomAgent(options: CreateRunloomAgentOptions): Pr
 export { APPROVAL_MODES, PERMISSION_SCOPES } from "./approvals/policy.js";
 export { createClaudeCodeExternalAgentAdapter } from "./external-agents/claude-code-adapter.js";
 export { createCodexExternalAgentAdapter } from "./external-agents/codex-adapter.js";
+export { createLocalCliExternalAgentAdapter } from "./external-agents/local-cli-adapter.js";
 export {
   ApprovalError,
   EvolutionError,
@@ -28,6 +29,7 @@ export type { OpenAIResponsesProviderOptions } from "./providers/openai-response
 export type { OpenAIChatCompletionsProviderOptions } from "./providers/openai-chat-completions-provider.js";
 export type { ClaudeCodeExternalAgentAdapterOptions } from "./external-agents/claude-code-adapter.js";
 export type { CodexExternalAgentAdapterOptions } from "./external-agents/codex-adapter.js";
+export type { LocalCliExternalAgentAdapterOptions } from "./external-agents/local-cli-adapter.js";
 export type {
   ApprovalBridge,
   ApprovalDecision,

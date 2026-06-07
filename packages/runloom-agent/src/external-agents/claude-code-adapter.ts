@@ -1,31 +1,24 @@
-import type { ExternalAgentAdapter, ExternalAgentAdapterStatus } from "../types.js";
+import type { ExternalAgentAdapter } from "../types.js";
+import {
+  createLocalCliExternalAgentAdapter,
+  type LocalCliExternalAgentAdapterOptions
+} from "./local-cli-adapter.js";
 
 const DEFAULT_CLAUDE_CODE_CAPABILITIES = ["code_review", "edit"] as const;
 
-export interface ClaudeCodeExternalAgentAdapterOptions {
-  name?: string;
-  description?: string;
-  command?: string;
-  enabled?: boolean;
-  status?: ExternalAgentAdapterStatus;
-  capabilities?: string[];
-  maxTurns?: number;
-  error?: string;
-}
+export interface ClaudeCodeExternalAgentAdapterOptions extends Partial<LocalCliExternalAgentAdapterOptions> {}
 
 export function createClaudeCodeExternalAgentAdapter(
   options: ClaudeCodeExternalAgentAdapterOptions = {}
 ): ExternalAgentAdapter {
-  const enabled = options.enabled ?? true;
-  return {
+  return createLocalCliExternalAgentAdapter({
     name: options.name ?? "claude-code",
     description: options.description ?? "Claude Code CLI",
-    kind: "local_cli",
-    enabled,
-    status: options.status ?? (enabled ? "available" : "disabled"),
-    capabilities: options.capabilities ? [...options.capabilities] : [...DEFAULT_CLAUDE_CODE_CAPABILITIES],
     command: options.command ?? "claude",
-    maxTurns: options.maxTurns ?? 3,
+    enabled: options.enabled,
+    status: options.status,
+    capabilities: options.capabilities ? [...options.capabilities] : [...DEFAULT_CLAUDE_CODE_CAPABILITIES],
+    maxTurns: options.maxTurns,
     error: options.error
-  };
+  });
 }

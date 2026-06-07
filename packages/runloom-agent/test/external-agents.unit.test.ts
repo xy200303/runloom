@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createClaudeCodeExternalAgentAdapter,
   createCodexExternalAgentAdapter,
+  createLocalCliExternalAgentAdapter,
   createRunloomAgent
 } from "../src/index.js";
 
@@ -35,6 +36,31 @@ describe("external agent adapters", () => {
       capabilities: ["code_review", "edit"],
       command: "claude",
       maxTurns: 3,
+      error: undefined
+    });
+    expect(adapter.delegate).toBeUndefined();
+  });
+
+  it("creates a generic local CLI adapter descriptor", () => {
+    const capabilities = ["code_review", "diagnostics"];
+    const adapter = createLocalCliExternalAgentAdapter({
+      name: "team-reviewer",
+      description: "Team review specialist",
+      command: "team-reviewer",
+      capabilities,
+      maxTurns: 5
+    });
+    capabilities.push("edit");
+
+    expect(adapter).toEqual({
+      name: "team-reviewer",
+      description: "Team review specialist",
+      kind: "local_cli",
+      enabled: true,
+      status: "available",
+      capabilities: ["code_review", "diagnostics"],
+      command: "team-reviewer",
+      maxTurns: 5,
       error: undefined
     });
     expect(adapter.delegate).toBeUndefined();

@@ -49,7 +49,17 @@ type TuiShortcut =
   | "s"
   | "d";
 type ApprovalShortcut = Extract<TuiShortcut, "n" | "p" | "v" | "a" | "s" | "d">;
-type ActivityCategory = "runs" | "models" | "todos" | "coding" | "tools" | "approvals" | "reviews" | "skills" | "mcp";
+type ActivityCategory =
+  | "runs"
+  | "models"
+  | "todos"
+  | "coding"
+  | "tools"
+  | "approvals"
+  | "reviews"
+  | "skills"
+  | "mcp"
+  | "external";
 
 interface TuiViewContext {
   activeSessionId?: string;
@@ -1361,6 +1371,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           this.recordActivity(formatToolActivityEvent(event), "tools", event);
         } else if (event.type.startsWith("mcp.")) {
           this.recordActivity(event.type, "mcp", event);
+        } else if (event.type.startsWith("external_agent.")) {
+          this.recordActivity(event.type, "external", event);
         }
         break;
     }
@@ -2154,8 +2166,8 @@ function formatScrollCommandHelp(): string {
 function formatActivityCommandHelp(): string {
   return [
     "Usage:",
-    "  /activity [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [up|down|top|bottom] [lines]",
-    "  /activity view [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [index|latest|current]",
+    "  /activity [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp|external] [up|down|top|bottom] [lines]",
+    "  /activity view [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp|external] [index|latest|current]",
     "  /activity <filter> view [index|latest|current]"
   ].join("\n") + "\n";
 }
@@ -2191,6 +2203,9 @@ function parseActivityCategory(value: string): ActivityCategory | undefined {
   }
   if (value === "mcp") {
     return "mcp";
+  }
+  if (value === "external" || value === "externals" || value === "external_agent" || value === "external_agents") {
+    return "external";
   }
   return undefined;
 }

@@ -345,6 +345,15 @@ export interface ExternalAgentContextItem {
   path?: string;
 }
 
+export type ExternalAgentOutputFormat = "summary" | "json" | "patch" | "report";
+
+export interface ExternalAgentOutputContract {
+  format: ExternalAgentOutputFormat;
+  schema?: Record<string, unknown>;
+  requireChangedFilesSummary?: boolean;
+  requireVerificationNotes?: boolean;
+}
+
 export interface ExternalAgentDelegationRequest {
   task: string;
   workspace: string;
@@ -353,6 +362,7 @@ export interface ExternalAgentDelegationRequest {
   approvalId?: string;
   maxTurns?: number;
   constraints?: string[];
+  expectedOutput?: ExternalAgentOutputContract;
   context?: ExternalAgentContextItem[];
 }
 
@@ -361,6 +371,9 @@ export interface ExternalAgentDelegationResult {
   summary: string;
   approvalId?: string;
   outputText?: string;
+  structuredOutput?: unknown;
+  changedFiles?: string[];
+  verificationNotes?: string[];
   events?: RunloomEvent[];
   diagnostics?: string[];
 }

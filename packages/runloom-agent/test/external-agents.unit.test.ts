@@ -173,6 +173,8 @@ describe("external agent adapters", () => {
             status: "completed",
             summary: "Review complete.",
             outputText: `Reviewed workspace ${request.workspace}`,
+            changedFiles: ["packages/runloom-agent/src/types.ts"],
+            verificationNotes: ["unit tests passed"],
             diagnostics: ["ok"]
           };
         }
@@ -185,6 +187,11 @@ describe("external agent adapters", () => {
         sessionId: "ses_external",
         maxTurns: 5,
         constraints: ["read-only"],
+        expectedOutput: {
+          format: "report",
+          requireChangedFilesSummary: true,
+          requireVerificationNotes: true
+        },
         context: [{ kind: "text", title: "Scope", text: "Focus on public API." }]
       });
       const auditRecords = await agent.listAuditRecords({ action: "external_agent.delegated" });
@@ -193,6 +200,8 @@ describe("external agent adapters", () => {
         status: "completed",
         summary: "Review complete.",
         outputText: "Reviewed workspace [workspace]",
+        changedFiles: ["packages/runloom-agent/src/types.ts"],
+        verificationNotes: ["unit tests passed"],
         diagnostics: ["ok"]
       });
       expect(receivedRequest).toMatchObject({
@@ -202,6 +211,11 @@ describe("external agent adapters", () => {
         sessionId: "ses_external",
         maxTurns: 2,
         constraints: ["read-only"],
+        expectedOutput: {
+          format: "report",
+          requireChangedFilesSummary: true,
+          requireVerificationNotes: true
+        },
         context: [{ kind: "text", title: "Scope", text: "Focus on public API." }]
       });
       expect(eventTypes).toContain("external_agent.delegated");
@@ -219,6 +233,61 @@ describe("external agent adapters", () => {
         status: "completed",
         maxTurns: 2
       });
+    } finally {
+      await agent.close();
+    }
+  });
+
+  it("fails completed external delegations that violate the output contract", async () => {
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: "",
+      approvalPolicy: {
+        scopes: {
+          external_agents: "full_access"
+        }
+      }
+    });
+    const eventTypes: string[] = [];
+    agent.subscribe((event) => eventTypes.push(event.type));
+
+    try {
+      await agent.registerExternalAgent({
+        name: "contract-agent",
+        description: "Contract checked external agent",
+        kind: "local_cli",
+        enabled: true,
+        status: "available",
+        command: "contract-agent",
+        async delegate() {
+          return {
+            status: "completed",
+            summary: "Review complete.",
+            outputText: "No changed files included."
+          };
+        }
+      });
+
+      const result = await agent.delegateExternalAgent("contract-agent", {
+        task: "Review the current change",
+        workspace: ".",
+        runId: "run_external_contract",
+        sessionId: "ses_external_contract",
+        expectedOutput: {
+          format: "report",
+          requireChangedFilesSummary: true,
+          requireVerificationNotes: true
+        }
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.summary).toMatch(/output contract failed/);
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining(["changed files summary is required", "verification notes are required"])
+      );
+      expect(eventTypes).toContain("external_agent.failed");
     } finally {
       await agent.close();
     }

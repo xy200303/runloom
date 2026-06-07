@@ -58,6 +58,8 @@ export type {
   ExternalAgentContextItem,
   ExternalAgentDelegationRequest,
   ExternalAgentDelegationResult,
+  ExternalAgentOutputContract,
+  ExternalAgentOutputFormat,
   ExternalAgentSummary,
   GitStatusSummary,
   ListAuditRecordsOptions,

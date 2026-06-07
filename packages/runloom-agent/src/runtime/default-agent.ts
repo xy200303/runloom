@@ -40,6 +40,7 @@ import type {
   ExternalAgentAdapter,
   ExternalAgentDelegationRequest,
   ExternalAgentDelegationResult,
+  ExternalAgentOutputContract,
   ExternalAgentSummary,
   ListAuditRecordsOptions,
   ListDeliverySummariesOptions,
@@ -670,6 +671,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       workspace: normalizedRequest.workspace,
       maxTurns: normalizedRequest.maxTurns,
       constraints: normalizedRequest.constraints,
+      expectedOutput: normalizedRequest.expectedOutput,
       contextItems: normalizedRequest.context?.length ?? 0
     });
 
@@ -701,7 +703,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
     try {
       const result = await adapter.delegate(cloneExternalAgentDelegationRequest(normalizedRequest));
-      const safeResult = redactValue(cloneExternalAgentDelegationResult(result), { workspace: this.workspace });
+      const contractedResult = applyExternalAgentOutputContract(result, normalizedRequest.expectedOutput);
+      const safeResult = redactValue(cloneExternalAgentDelegationResult(contractedResult), { workspace: this.workspace });
       const durationMs = Date.now() - started;
       this.emit(
         safeResult.status === "completed" ? "external_agent.completed" : "external_agent.failed",
@@ -759,6 +762,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       approvalId: request.approvalId,
       maxTurns: Math.min(requestedMaxTurns, adapterMaxTurns),
       constraints: request.constraints ? [...request.constraints] : undefined,
+      expectedOutput: request.expectedOutput ? cloneExternalAgentOutputContract(request.expectedOutput) : undefined,
       context: request.context ? request.context.map((item) => ({ ...item })) : undefined
     };
   }
@@ -812,6 +816,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         workspace: request.workspace,
         maxTurns: request.maxTurns,
         constraints: request.constraints,
+        expectedOutput: request.expectedOutput,
         contextItems: request.context?.length ?? 0
       }
     };
@@ -835,7 +840,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
         approvalId: approval.id,
         mode,
         risk,
-        maxTurns: request.maxTurns
+        maxTurns: request.maxTurns,
+        expectedOutput: request.expectedOutput
       }
     });
     return {
@@ -2701,6 +2707,7 @@ function cloneExternalAgentDelegationRequest(
   return {
     ...request,
     constraints: request.constraints ? [...request.constraints] : undefined,
+    expectedOutput: request.expectedOutput ? cloneExternalAgentOutputContract(request.expectedOutput) : undefined,
     context: request.context ? request.context.map((item) => ({ ...item })) : undefined
   };
 }
@@ -2708,9 +2715,81 @@ function cloneExternalAgentDelegationRequest(
 function cloneExternalAgentDelegationResult(result: ExternalAgentDelegationResult): ExternalAgentDelegationResult {
   return {
     ...result,
+    changedFiles: result.changedFiles ? [...result.changedFiles] : undefined,
+    verificationNotes: result.verificationNotes ? [...result.verificationNotes] : undefined,
     events: result.events ? result.events.map((event) => ({ ...event })) : undefined,
     diagnostics: result.diagnostics ? [...result.diagnostics] : undefined
   };
+}
+
+function cloneExternalAgentOutputContract(contract: ExternalAgentOutputContract): ExternalAgentOutputContract {
+  return {
+    ...contract,
+    schema: contract.schema ? { ...contract.schema } : undefined
+  };
+}
+
+function applyExternalAgentOutputContract(
+  result: ExternalAgentDelegationResult,
+  contract?: ExternalAgentOutputContract
+): ExternalAgentDelegationResult {
+  const cloned = cloneExternalAgentDelegationResult(result);
+  if (!contract || cloned.status !== "completed") {
+    return cloned;
+  }
+
+  const diagnostics = validateExternalAgentOutputContract(cloned, contract);
+  if (diagnostics.length === 0) {
+    return cloned;
+  }
+
+  return {
+    ...cloned,
+    status: "failed",
+    summary: `External agent output contract failed: ${diagnostics.join("; ")}`,
+    diagnostics: [...(cloned.diagnostics ?? []), ...diagnostics]
+  };
+}
+
+function validateExternalAgentOutputContract(
+  result: ExternalAgentDelegationResult,
+  contract: ExternalAgentOutputContract
+): string[] {
+  const diagnostics: string[] = [];
+  const outputText = result.outputText?.trim() ?? "";
+
+  if (contract.format === "summary" && !result.summary.trim()) {
+    diagnostics.push("summary output is required");
+  }
+  if (contract.format === "json" && result.structuredOutput === undefined && !isJsonText(outputText)) {
+    diagnostics.push("json output is required");
+  }
+  if (contract.format === "patch" && outputText.length === 0) {
+    diagnostics.push("patch output text is required");
+  }
+  if (contract.format === "report" && (!result.summary.trim() || outputText.length === 0)) {
+    diagnostics.push("report summary and output text are required");
+  }
+  if (contract.requireChangedFilesSummary && (!result.changedFiles || result.changedFiles.length === 0)) {
+    diagnostics.push("changed files summary is required");
+  }
+  if (contract.requireVerificationNotes && (!result.verificationNotes || result.verificationNotes.length === 0)) {
+    diagnostics.push("verification notes are required");
+  }
+
+  return diagnostics;
+}
+
+function isJsonText(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function errorMessage(error: unknown): string {

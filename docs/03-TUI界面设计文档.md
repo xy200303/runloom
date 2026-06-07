@@ -100,7 +100,7 @@ TUI 不解析供应商原始 streaming event。
 - `/session list`：列出 session。
 - `/session switch <id>`：切换 session。
 - `/todo`：显示 todo。
-- `/activity [filter]`：显示 activity，可按 `runs`、`models`、`todos`、`coding`、`tools`、`approvals`、`reviews`、`skills`、`mcp`、`external` 过滤。
+- `/activity [filter]`：显示 activity，可按 `runs`、`models`、`todos`、`coding`、`tools`、`approvals`、`reviews`、`skills`、`mcp`、`a2a`、`external` 过滤。
 - `/activity view [filter] [index|latest|current]`：查看 activity 详情，包括事件类型、run/session、source、timestamp 和 payload；`current`、`selected` 或 `.` 指向当前滚动窗口顶部可见项。
 - `/tools`：显示可用工具。
 - `/diff`：显示当前 run 产生的 diff 摘要。
@@ -251,7 +251,7 @@ TUI 需要把编程开发活动作为一等状态展示：
 - Git 状态：当前分支、dirty files、用户未提交改动风险。
 - Review：发现的问题、严重程度、文件位置和建议验证方式。
 
-首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp|external` 和 `/activity view ...`。详情视图支持按编号、`latest` 或当前滚动窗口顶部可见项展开。`/git`、`/diff`、`/tests` 这类由用户在 TUI 主动触发的 public tool API 结果也会记录到 `coding` activity，所有过滤与详情视图仍只消费 TUI view state。
+首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp|a2a|external` 和 `/activity view ...`。详情视图支持按编号、`latest` 或当前滚动窗口顶部可见项展开。`/git`、`/diff`、`/tests` 这类由用户在 TUI 主动触发的 public tool API 结果也会记录到 `coding` activity，所有过滤与详情视图仍只消费 TUI view state。
 
 原则：
 
@@ -271,7 +271,7 @@ TUI 需要把编程开发活动作为一等状态展示：
 - growth proposals。
 - eval gate 状态。
 
-首期命令式界面通过 `/a2a` 展示已注册的 A2A peers，包括 status、transport、endpoint、version 和 capability names；通过 `/external` 展示已注册的 external agent adapters，包括 kind、status、capabilities、command 和 maxTurns；`external_agent.*` 事件进入 `/activity external` 过滤视图；未注册时显示空状态，不注入产品 mock 数据。委托执行后续仍由 `runloom-agent` 的 approval/audit 路径承接。
+首期命令式界面通过 `/a2a` 展示已注册的 A2A peers，包括 status、transport、endpoint、version 和 capability names；`a2a.*` 事件进入 `/activity a2a` 过滤视图；通过 `/external` 展示已注册的 external agent adapters，包括 kind、status、capabilities、command 和 maxTurns；`external_agent.*` 事件进入 `/activity external` 过滤视图；未注册时显示空状态，不注入产品 mock 数据。委托执行后续仍由 `runloom-agent` 的 approval/audit 路径承接。
 
 这些都是 runtime 状态，TUI 只展示和提交用户决定。
 

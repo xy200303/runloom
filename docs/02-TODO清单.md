@@ -128,7 +128,7 @@
 - [x] CLI bin：`runloom`。
 - [x] 嵌入式 TUI API：`createRunloomTuiApp`。
 - [~] transcript 区、输入区、todo 区、tool activity 区、status 区：已建立命令式 view-state panel、焦点切换、面板滚动和 status scroll offset 展示；仍需完整全屏布局。
-- [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态、todo、activity panel、`/activity` 分类过滤、`/activity view` 详情、当前可见 activity 详情锚点和 `/key enter` 默认展开动作，并将 TUI 主动触发的 `/git`、`/diff`、`/tests` 结果记录进 coding activity，且支持 `external_agent.*` 事件进入 external activity 过滤视图；仍需完整 activity panel 交互。
+- [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态、todo、activity panel、`/activity` 分类过滤、`/activity view` 详情、当前可见 activity 详情锚点和 `/key enter` 默认展开动作，并将 TUI 主动触发的 `/git`、`/diff`、`/tests` 结果记录进 coding activity，且支持 `a2a.*` 和 `external_agent.*` 事件进入对应 activity 过滤视图；仍需完整 activity panel 交互。
 - [~] approval 弹窗：已实现 Approval Center、`/approvals next|prev|view|focus`、`/approve selected` remember/mode 选项、`/deny selected` reason 和 `/key n|p|v|a|s|d` line-mode 快捷处理；仍需弹窗/真实 raw-key UI。
 - [~] `/permissions` 权限审批设置面板：已实现完整 scope 表和 `/permissions set` 命令式修改；仍需全屏设置 UI。
 - [x] 基础命令：已实现 `/help`、`/status`、`/view`、`/transcript`、`/activity`、`/focus`、`/scroll`、`/clear`、`/key`、`/replay`、`/permissions`、`/permissions set`、`/approval`、`/approvals`、`/approvals view`、`/approve`、`/deny`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/a2a`、`/external`、`/quit`。
@@ -182,7 +182,7 @@
 - [x] 其他本地 coding agent adapter 扩展点：已提供 `createLocalCliExternalAgentAdapter(...)` public descriptor factory，供 host 注册团队内部或第三方本地 CLI coding agent。
 - [x] 外部委托的 workspace、权限、最大轮数、输出格式限制：已提供 `delegateExternalAgent(...)` public API，对 workspace/maxTurns 做归一化，接入 `external_agents` approval policy，并验证基础 output contract。
 - [~] 委托事件、日志和 audit trail：`delegateExternalAgent(...)` 已写入 approval/delegated/event/completed/failed external events、转发 adapter result events，并写入 audit record；完整流式日志仍待实现。
-- [~] A2A discovery、capability、delegation、result exchange：已定义 A2A peer/capability public 类型、register/list API、TUI `/a2a` 真实注册状态展示和 `a2a.peer.discovered` 事件；task delegation/result exchange 仍待实现。
+- [~] A2A discovery、capability、delegation、result exchange：已定义 A2A peer/capability public 类型、register/list API、TUI `/a2a` 真实注册状态展示、`a2a.*` activity 过滤和 `a2a.peer.discovered` 事件；task delegation/result exchange 仍待实现。
 
 验收标准：
 

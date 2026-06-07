@@ -60,6 +60,7 @@ type ActivityCategory =
   | "reviews"
   | "skills"
   | "mcp"
+  | "a2a"
   | "external";
 
 interface TuiViewContext {
@@ -1379,6 +1380,8 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           this.recordActivity(formatToolActivityEvent(event), "tools", event);
         } else if (event.type.startsWith("mcp.")) {
           this.recordActivity(event.type, "mcp", event);
+        } else if (event.type.startsWith("a2a.")) {
+          this.recordActivity(event.type, "a2a", event);
         } else if (event.type.startsWith("external_agent.")) {
           this.recordActivity(event.type, "external", event);
         }
@@ -2195,8 +2198,8 @@ function formatScrollCommandHelp(): string {
 function formatActivityCommandHelp(): string {
   return [
     "Usage:",
-    "  /activity [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp|external] [up|down|top|bottom] [lines]",
-    "  /activity view [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp|external] [index|latest|current]",
+    "  /activity [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp|a2a|external] [up|down|top|bottom] [lines]",
+    "  /activity view [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp|a2a|external] [index|latest|current]",
     "  /activity <filter> view [index|latest|current]"
   ].join("\n") + "\n";
 }
@@ -2232,6 +2235,9 @@ function parseActivityCategory(value: string): ActivityCategory | undefined {
   }
   if (value === "mcp") {
     return "mcp";
+  }
+  if (value === "a2a") {
+    return "a2a";
   }
   if (value === "external" || value === "externals" || value === "external_agent" || value === "external_agents") {
     return "external";

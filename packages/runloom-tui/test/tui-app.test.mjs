@@ -508,11 +508,25 @@ test("approval command updates scope and default modes", async () => {
     }
   });
   app.render({
+    id: "evt_a2a_peer_discovered",
+    type: "a2a.peer.discovered",
+    runId: "run_tool",
+    sessionId: "ses_tool",
+    sequence: 5,
+    timestamp: "2026-01-01T00:00:03.750Z",
+    source: "runtime",
+    payload: {
+      id: "docs",
+      name: "Documentation Agent",
+      status: "available"
+    }
+  });
+  app.render({
     id: "evt_external_registered",
     type: "external_agent.adapter.registered",
     runId: "run_tool",
     sessionId: "ses_tool",
-    sequence: 5,
+    sequence: 6,
     timestamp: "2026-01-01T00:00:03.800Z",
     source: "runtime",
     payload: {
@@ -528,10 +542,12 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/activity reviews");
   await app.runCommand("/activity tools");
   await app.runCommand("/activity mcp");
+  await app.runCommand("/activity a2a");
   await app.runCommand("/activity external");
   await app.runCommand("/activity view models 1");
   await app.runCommand("/activity tools view latest");
   await app.runCommand("/activity view mcp latest");
+  await app.runCommand("/activity view a2a latest");
   await app.runCommand("/activity view external latest");
   await app.runCommand("/view");
   for (let index = 0; index < 25; index += 1) {
@@ -650,13 +666,16 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Activity \(reviews\):\n {2}review findings recorded/);
   assert.match(text, /Activity \(tools\):\n {2}tool\.completed fs\.read status=completed/);
   assert.match(text, /Activity \(mcp\):\n {2}mcp\.server\.connected/);
+  assert.match(text, /Activity \(a2a\):\n {2}a2a\.peer\.discovered/);
   assert.match(text, /Activity \(external\):\n {2}external_agent\.adapter\.registered/);
   assert.match(text, /Activity Detail \(models\): #3\n {2}category: models\n {2}filteredIndex: 1\n {2}event: model\.selection\.resolved/);
   assert.match(text, /"providerId": "openai-responses"/);
   assert.match(text, /Activity Detail \(tools\): #7\n {2}category: tools\n {2}filteredIndex: 1\n {2}event: tool\.completed/);
   assert.match(text, /"toolName": "fs\.read"/);
   assert.match(text, /Activity Detail \(mcp\): #8\n {2}category: mcp\n {2}filteredIndex: 1\n {2}event: mcp\.server\.connected/);
-  assert.match(text, /Activity Detail \(external\): #9\n {2}category: external\n {2}filteredIndex: 1\n {2}event: external_agent\.adapter\.registered/);
+  assert.match(text, /Activity Detail \(a2a\): #9\n {2}category: a2a\n {2}filteredIndex: 1\n {2}event: a2a\.peer\.discovered/);
+  assert.match(text, /"id": "docs"/);
+  assert.match(text, /Activity Detail \(external\): #10\n {2}category: external\n {2}filteredIndex: 1\n {2}event: external_agent\.adapter\.registered/);
   assert.match(text, /"name": "codex"/);
   assert.match(text, /Focus set to transcript/);
   assert.match(text, /Transcript: showing 1-20 of 27 offset=7/);
@@ -664,11 +683,11 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Transcript: showing 8-27 of 27/);
   assert.match(text, /assistant: Scroll response 24\./);
   assert.match(text, /Focus set to activity/);
-  assert.match(text, /Activity: showing 1-20 of 34 offset=14/);
-  assert.match(text, /Shortcut End\nActivity: showing 15-34 of 34/);
-  assert.match(text, /Shortcut Home\nActivity: showing 1-20 of 34 offset=14/);
-  assert.match(text, /Shortcut PgDn\nActivity: showing 15-34 of 34/);
-  assert.match(text, /Shortcut PgUp\nActivity: showing 1-20 of 34 offset=14/);
+  assert.match(text, /Activity: showing 1-20 of 35 offset=15/);
+  assert.match(text, /Shortcut End\nActivity: showing 16-35 of 35/);
+  assert.match(text, /Shortcut Home\nActivity: showing 1-20 of 35 offset=15/);
+  assert.match(text, /Shortcut PgDn\nActivity: showing 16-35 of 35/);
+  assert.match(text, /Shortcut PgUp\nActivity: showing 1-20 of 35 offset=15/);
   assert.match(text, /Activity Detail: #1\n {2}category: coding\n {2}filteredIndex: 1\n {2}event: tool\.git\.status/);
   assert.match(text, /Shortcut Alt\+1\nFocus set to transcript/);
   assert.match(text, /Shortcut PgUp\nTranscript: showing 1-20 of 27 offset=7/);
@@ -677,8 +696,8 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Shortcut Alt\+3\nFocus set to activity/);
   assert.match(text, /Shortcut Enter\nActivity Detail: #1\n {2}category: coding\n {2}filteredIndex: 1\n {2}event: tool\.git\.status/);
   assert.match(text, /Shortcut Tab\nFocus set to status\nStatus:\n {2}session: ses_tool/);
-  assert.match(text, /Shortcut Shift\+Tab\nFocus set to activity\nActivity: showing 1-20 of 34 offset=14/);
-  assert.match(text, /Shortcut Alt\+4\nFocus set to status\nStatus:\n {2}session: ses_tool\n {2}run: run_tool status=running\n {2}focus: status\n {2}scroll: transcript=0, todo=0, activity=14/);
+  assert.match(text, /Shortcut Shift\+Tab\nFocus set to activity\nActivity: showing 1-20 of 35 offset=15/);
+  assert.match(text, /Shortcut Alt\+4\nFocus set to status\nStatus:\n {2}session: ses_tool\n {2}run: run_tool status=running\n {2}focus: status\n {2}scroll: transcript=0, todo=0, activity=15/);
   assert.match(text, /Shortcut Esc\nFocus set to transcript\nTranscript: showing 8-27 of 27/);
   assert.match(text, /Todo:\n {2}in_progress Check TUI commands/);
   assert.match(text, /\[review\] 1 finding\(s\)/);
@@ -690,7 +709,7 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /\[tests\] pnpm typecheck exit=0 duration=12ms/);
   assert.match(text, /tests ok/);
   assert.match(text, /Activity \(coding\):\n {2}git main \(clean\)\n {2}diff 1 file\(s\), \+4\/-1\n {2}tests pnpm typecheck exit=0 duration=12ms/);
-  assert.match(text, /Activity Detail \(coding\): #36\n {2}category: coding\n {2}filteredIndex: 3\n {2}event: tool\.shell\.verify/);
+  assert.match(text, /Activity Detail \(coding\): #37\n {2}category: coding\n {2}filteredIndex: 3\n {2}event: tool\.shell\.verify/);
   assert.match(text, /"command": "pnpm typecheck"/);
   assert.match(text, /Stop requested for run_tool/);
   assert.match(text, /\[resume\] run_tool -> run_resumed completed/);

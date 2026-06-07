@@ -40,6 +40,8 @@ export type {
   A2ACapabilitySummary,
   A2ADelegationRequest,
   A2ADelegationResult,
+  A2AOutputContract,
+  A2AOutputFormat,
   A2APeerRegistration,
   A2APeerStatus,
   A2APeerSummary,

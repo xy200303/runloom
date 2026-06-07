@@ -34,6 +34,7 @@ import type {
   ApprovalRequest,
   A2ADelegationRequest,
   A2ADelegationResult,
+  A2AOutputContract,
   A2APeerRegistration,
   A2APeerSummary,
   CreateRunloomMcpServerOptions,
@@ -675,6 +676,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       capability: normalizedRequest.capability,
       workspace: normalizedRequest.workspace,
       constraints: normalizedRequest.constraints,
+      expectedOutput: normalizedRequest.expectedOutput,
       contextItems: normalizedRequest.context?.length ?? 0
     });
 
@@ -707,7 +709,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
     try {
       const result = await peer.delegate(cloneA2ADelegationRequest(normalizedRequest));
-      const safeResult = redactValue(cloneA2ADelegationResult(result), { workspace: this.workspace });
+      const contractedResult = applyA2AOutputContract(result, normalizedRequest.expectedOutput);
+      const safeResult = redactValue(cloneA2ADelegationResult(contractedResult), { workspace: this.workspace });
       const durationMs = Date.now() - started;
       for (const event of safeResult.events ?? []) {
         this.emit("a2a.event", "a2a", runId, sessionId, {
@@ -731,6 +734,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
           status: safeResult.status,
           capability: normalizedRequest.capability,
           workspace: normalizedRequest.workspace,
+          expectedOutput: normalizedRequest.expectedOutput,
           eventCount: safeResult.events?.length ?? 0,
           durationMs
         }
@@ -775,6 +779,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       approvalId: request.approvalId,
       capability: capability || undefined,
       constraints: request.constraints ? [...request.constraints] : undefined,
+      expectedOutput: request.expectedOutput ? cloneA2AOutputContract(request.expectedOutput) : undefined,
       context: request.context ? request.context.map((item) => ({ ...item })) : undefined
     };
   }
@@ -829,6 +834,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         task: request.task,
         workspace: request.workspace,
         constraints: request.constraints,
+        expectedOutput: request.expectedOutput,
         contextItems: request.context?.length ?? 0
       }
     };
@@ -852,7 +858,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
         approvalId: approval.id,
         mode,
         risk,
-        capability: request.capability
+        capability: request.capability,
+        expectedOutput: request.expectedOutput
       }
     });
     return {
@@ -3054,6 +3061,7 @@ function cloneA2ADelegationRequest(request: A2ADelegationRequest): A2ADelegation
   return {
     ...request,
     constraints: request.constraints ? [...request.constraints] : undefined,
+    expectedOutput: request.expectedOutput ? cloneA2AOutputContract(request.expectedOutput) : undefined,
     context: request.context ? request.context.map((item) => ({ ...item })) : undefined
   };
 }
@@ -3061,9 +3069,71 @@ function cloneA2ADelegationRequest(request: A2ADelegationRequest): A2ADelegation
 function cloneA2ADelegationResult(result: A2ADelegationResult): A2ADelegationResult {
   return {
     ...result,
+    evidence: result.evidence ? [...result.evidence] : undefined,
+    changedFiles: result.changedFiles ? [...result.changedFiles] : undefined,
+    verificationNotes: result.verificationNotes ? [...result.verificationNotes] : undefined,
+    limitations: result.limitations ? [...result.limitations] : undefined,
     events: result.events ? result.events.map((event) => ({ ...event })) : undefined,
     diagnostics: result.diagnostics ? [...result.diagnostics] : undefined
   };
+}
+
+function cloneA2AOutputContract(contract: A2AOutputContract): A2AOutputContract {
+  return {
+    ...contract,
+    schema: contract.schema ? { ...contract.schema } : undefined
+  };
+}
+
+function applyA2AOutputContract(
+  result: A2ADelegationResult,
+  contract?: A2AOutputContract
+): A2ADelegationResult {
+  const cloned = cloneA2ADelegationResult(result);
+  if (!contract || cloned.status !== "completed") {
+    return cloned;
+  }
+
+  const diagnostics = validateA2AOutputContract(cloned, contract);
+  if (diagnostics.length === 0) {
+    return cloned;
+  }
+
+  return {
+    ...cloned,
+    status: "failed",
+    summary: `A2A output contract failed: ${diagnostics.join("; ")}`,
+    diagnostics: [...(cloned.diagnostics ?? []), ...diagnostics]
+  };
+}
+
+function validateA2AOutputContract(result: A2ADelegationResult, contract: A2AOutputContract): string[] {
+  const diagnostics: string[] = [];
+  const outputText = result.outputText?.trim() ?? "";
+
+  if (contract.format === "summary" && !result.summary.trim()) {
+    diagnostics.push("summary output is required");
+  }
+  if (contract.format === "json" && result.structuredOutput === undefined && !isJsonText(outputText)) {
+    diagnostics.push("json output is required");
+  }
+  if (contract.format === "report" && (!result.summary.trim() || outputText.length === 0)) {
+    diagnostics.push("report summary and output text are required");
+  }
+  if (contract.requireEvidence && (!result.evidence || result.evidence.length === 0)) {
+    diagnostics.push("evidence is required");
+  }
+  if (contract.requireChangedFilesSummary && (!result.changedFiles || result.changedFiles.length === 0)) {
+    diagnostics.push("changed files summary is required");
+  }
+  if (contract.requireVerificationNotes && (!result.verificationNotes || result.verificationNotes.length === 0)) {
+    diagnostics.push("verification notes are required");
+  }
+  if (contract.requireLimitations && (!result.limitations || result.limitations.length === 0)) {
+    diagnostics.push("limitations are required");
+  }
+
+  return diagnostics;
 }
 
 function cloneExternalAgentDelegationRequest(

@@ -426,6 +426,17 @@ export interface A2APeerSummary {
   error?: string;
 }
 
+export type A2AOutputFormat = "summary" | "json" | "report";
+
+export interface A2AOutputContract {
+  format: A2AOutputFormat;
+  schema?: Record<string, unknown>;
+  requireEvidence?: boolean;
+  requireChangedFilesSummary?: boolean;
+  requireVerificationNotes?: boolean;
+  requireLimitations?: boolean;
+}
+
 export interface A2ADelegationRequest {
   task: string;
   workspace: string;
@@ -434,6 +445,7 @@ export interface A2ADelegationRequest {
   approvalId?: string;
   capability?: string;
   constraints?: string[];
+  expectedOutput?: A2AOutputContract;
   context?: ExternalAgentContextItem[];
 }
 
@@ -443,6 +455,10 @@ export interface A2ADelegationResult {
   approvalId?: string;
   outputText?: string;
   structuredOutput?: unknown;
+  evidence?: string[];
+  changedFiles?: string[];
+  verificationNotes?: string[];
+  limitations?: string[];
   events?: RunloomEvent[];
   diagnostics?: string[];
 }

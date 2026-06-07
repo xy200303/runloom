@@ -103,6 +103,10 @@ describe("A2A peers", () => {
             status: "completed",
             summary: "Documentation summarized.",
             outputText: "Summary complete.",
+            evidence: ["README.md"],
+            changedFiles: ["docs/summary.md"],
+            verificationNotes: ["reviewed summary output"],
+            limitations: ["No diagrams were inspected"],
             events: [
               {
                 id: "evt_peer_progress",
@@ -128,6 +132,13 @@ describe("A2A peers", () => {
         sessionId: "ses_a2a_delegate",
         capability: "summarize-docs",
         constraints: ["Do not reveal secrets"],
+        expectedOutput: {
+          format: "report",
+          requireEvidence: true,
+          requireChangedFilesSummary: true,
+          requireVerificationNotes: true,
+          requireLimitations: true
+        },
         context: [{ kind: "text", title: "README", text: "Project documentation" }]
       });
       const auditRecords = await agent.listAuditRecords({ action: "a2a.delegated" });
@@ -135,7 +146,11 @@ describe("A2A peers", () => {
       expect(result).toMatchObject({
         status: "completed",
         summary: "Documentation summarized.",
-        outputText: "Summary complete."
+        outputText: "Summary complete.",
+        evidence: ["README.md"],
+        changedFiles: ["docs/summary.md"],
+        verificationNotes: ["reviewed summary output"],
+        limitations: ["No diagrams were inspected"]
       });
       expect(delegatedTask).toBe("Summarize project documentation");
       expect(delegatedWorkspace).toBe(process.cwd());
@@ -153,8 +168,77 @@ describe("A2A peers", () => {
         peerId: "docs",
         status: "completed",
         capability: "summarize-docs",
+        expectedOutput: {
+          format: "report",
+          requireEvidence: true,
+          requireChangedFilesSummary: true,
+          requireVerificationNotes: true,
+          requireLimitations: true
+        },
         eventCount: 1
       });
+    } finally {
+      await agent.close();
+    }
+  });
+
+  it("fails completed A2A delegations that violate the output contract", async () => {
+    const agent = await createRunloomAgent({
+      provider: "openai-responses",
+      model: "gpt-4.1",
+      workspace: process.cwd(),
+      apiKey: "",
+      approvalPolicy: {
+        scopes: {
+          "a2a.delegation": "full_access"
+        }
+      }
+    });
+    const eventTypes: string[] = [];
+    agent.subscribe((event) => eventTypes.push(event.type));
+
+    try {
+      await agent.registerA2APeer({
+        id: "contract-docs",
+        name: "Contract Documentation Agent",
+        enabled: true,
+        status: "available",
+        capabilities: [{ name: "summarize-docs" }],
+        async delegate() {
+          return {
+            status: "completed",
+            summary: "Documentation summarized."
+          };
+        }
+      });
+
+      const result = await agent.delegateA2APeer("contract-docs", {
+        task: "Summarize docs with evidence",
+        workspace: ".",
+        runId: "run_a2a_contract",
+        sessionId: "ses_a2a_contract",
+        capability: "summarize-docs",
+        expectedOutput: {
+          format: "report",
+          requireEvidence: true,
+          requireChangedFilesSummary: true,
+          requireVerificationNotes: true,
+          requireLimitations: true
+        }
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.summary).toMatch(/A2A output contract failed/);
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          "report summary and output text are required",
+          "evidence is required",
+          "changed files summary is required",
+          "verification notes are required",
+          "limitations are required"
+        ])
+      );
+      expect(eventTypes).toContain("a2a.failed");
     } finally {
       await agent.close();
     }

@@ -23,11 +23,14 @@ import type {
 const MAX_VIEW_LINES = 200;
 const DEFAULT_PANEL_LINES = 20;
 const COMPOSITE_PANEL_LINES = 8;
+const FOCUS_PANELS: TuiPanel[] = ["status", "transcript", "todo", "activity"];
 
 type TuiPanel = "status" | "transcript" | "todo" | "activity";
 type ScrollAction = "up" | "down" | "top" | "bottom";
 type TuiShortcut =
   | "ctrl+l"
+  | "tab"
+  | "shift+tab"
   | "pgup"
   | "pgdn"
   | "home"
@@ -734,6 +737,14 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       return;
     }
 
+    if (shortcut === "tab" || shortcut === "shift+tab") {
+      const panel = this.cycleFocus(shortcut === "tab" ? 1 : -1);
+      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+      output.write(`Focus set to ${panel}\n`);
+      output.write(this.formatPanel(panel));
+      return;
+    }
+
     if (isApprovalShortcut(shortcut)) {
       output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
       await this.handleApprovalShortcut(shortcut, shortcutArgs);
@@ -750,6 +761,16 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
     output.write(`Focus set to ${panel}\n`);
     output.write(this.formatPanel(panel));
+  }
+
+  private cycleFocus(direction: 1 | -1): TuiPanel {
+    const currentIndex = FOCUS_PANELS.indexOf(this.viewState.focus);
+    const nextIndex = currentIndex === -1
+      ? 0
+      : (currentIndex + direction + FOCUS_PANELS.length) % FOCUS_PANELS.length;
+    const panel = FOCUS_PANELS[nextIndex] ?? "transcript";
+    this.viewState.focus = panel;
+    return panel;
   }
 
   private async handleApprovalShortcut(shortcut: ApprovalShortcut, args: string[]): Promise<void> {
@@ -2088,7 +2109,7 @@ function formatActivityCommandHelp(): string {
 }
 
 function formatShortcutCommandHelp(): string {
-  return "Usage: /key <ctrl+l|pgup|pgdn|home|end|alt+1|alt+2|alt+3|n|p|v|a|s|d> [deny-reason]\n";
+  return "Usage: /key <ctrl+l|tab|shift+tab|pgup|pgdn|home|end|alt+1|alt+2|alt+3|n|p|v|a|s|d> [deny-reason]\n";
 }
 
 function parseActivityCategory(value: string): ActivityCategory | undefined {
@@ -2126,6 +2147,12 @@ function normalizeShortcut(value: string): TuiShortcut | undefined {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "");
   if (normalized === "ctrl+l" || normalized === "control+l") {
     return "ctrl+l";
+  }
+  if (normalized === "tab") {
+    return "tab";
+  }
+  if (normalized === "shift+tab" || normalized === "shift-tab" || normalized === "backtab") {
+    return "shift+tab";
   }
   if (normalized === "pgup" || normalized === "pageup") {
     return "pgup";
@@ -2173,6 +2200,10 @@ function formatShortcutLabel(shortcut: TuiShortcut): string {
   switch (shortcut) {
     case "ctrl+l":
       return "Ctrl+L";
+    case "tab":
+      return "Tab";
+    case "shift+tab":
+      return "Shift+Tab";
     case "pgup":
       return "PgUp";
     case "pgdn":

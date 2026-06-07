@@ -525,6 +525,8 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/key pgdn");
   await app.runCommand("/key alt+2");
   await app.runCommand("/key alt+3");
+  await app.runCommand("/key tab");
+  await app.runCommand("/key shift+tab");
   await app.runCommand("/todo");
   await app.runCommand("/diff");
   await app.runCommand("/tests pnpm typecheck");
@@ -615,6 +617,8 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /Shortcut PgDn\nTranscript: showing 8-27 of 27/);
   assert.match(text, /Shortcut Alt\+2\nFocus set to todo/);
   assert.match(text, /Shortcut Alt\+3\nFocus set to activity/);
+  assert.match(text, /Shortcut Tab\nFocus set to status\nStatus:\n {2}session: ses_tool/);
+  assert.match(text, /Shortcut Shift\+Tab\nFocus set to activity\nActivity: showing 1-20 of 33 offset=13/);
   assert.match(text, /Todo:\n {2}in_progress Check TUI commands/);
   assert.match(text, /\[review\] 1 finding\(s\)/);
   assert.match(text, /Files: packages\/runloom-tui\/src\/app\/tui-app\.ts/);

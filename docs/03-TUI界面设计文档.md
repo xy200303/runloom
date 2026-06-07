@@ -271,7 +271,7 @@ TUI 需要把编程开发活动作为一等状态展示：
 - growth proposals。
 - eval gate 状态。
 
-首期命令式界面通过 `/external` 展示已注册的 external agent adapters，包括 kind、status、capabilities、command 和 maxTurns；`external_agent.*` 事件进入 `/activity external` 过滤视图；未注册时显示空状态，不注入产品 mock 数据。委托执行后续仍由 `runloom-agent` 的 approval/audit 路径承接。
+首期命令式界面通过 `/a2a` 展示已注册的 A2A peers，包括 status、transport、endpoint、version 和 capability names；通过 `/external` 展示已注册的 external agent adapters，包括 kind、status、capabilities、command 和 maxTurns；`external_agent.*` 事件进入 `/activity external` 过滤视图；未注册时显示空状态，不注入产品 mock 数据。委托执行后续仍由 `runloom-agent` 的 approval/audit 路径承接。
 
 这些都是 runtime 状态，TUI 只展示和提交用户决定。
 

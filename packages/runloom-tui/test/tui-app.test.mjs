@@ -154,6 +154,25 @@ test("approval command updates scope and default modes", async () => {
         }
       ];
     },
+    async listA2APeers() {
+      return [
+        {
+          id: "docs",
+          name: "Documentation Agent",
+          version: "0.1.0",
+          endpoint: "http://127.0.0.1:43120/a2a",
+          transport: "http",
+          enabled: true,
+          status: "available",
+          capabilities: [
+            {
+              name: "summarize-docs",
+              description: "Summarize project documentation"
+            }
+          ]
+        }
+      ];
+    },
     async listExternalAgents() {
       return [
         {
@@ -363,6 +382,7 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/tools");
   await app.runCommand("/skills");
   await app.runCommand("/mcp");
+  await app.runCommand("/a2a");
   await app.runCommand("/external");
   await app.runCommand("/git");
   await app.runCommand("/session");
@@ -612,6 +632,7 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /fs\.read - Read a file \[filesystem\.read\]/);
   assert.match(text, /typescript-code-review@0\.1\.0 enabled source=registered tools=fs\.read/);
   assert.match(text, /workspace enabled transport=stdio status=connected tools=fs\.read resources=1 prompts=0/);
+  assert.match(text, /Documentation Agent enabled status=available transport=http endpoint=http:\/\/127\.0\.0\.1:43120\/a2a version=0\.1\.0 capabilities=summarize-docs id=docs/);
   assert.match(text, /codex enabled kind=local_cli status=available capabilities=code_review,edit command=codex maxTurns=3 - Codex CLI/);
   assert.match(text, /\[git\] main \(clean\)/);
   assert.match(text, /Session: ses_tool/);

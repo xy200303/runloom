@@ -3,6 +3,7 @@ import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import type { Readable, Writable } from "node:stream";
 import { APPROVAL_MODES, PERMISSION_SCOPES } from "runloom-agent";
 import type {
+  A2APeerSummary,
   ApprovalDecision,
   ApprovalMode,
   ApprovalPolicyConfig,
@@ -324,6 +325,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /resume        Resume a previous run",
           "  /skills        List registered skills",
           "  /mcp           List MCP servers",
+          "  /a2a           List A2A peers",
           "  /external      List external agent adapters",
           "  /git           Show git status",
           "  /tests         Run verification command",
@@ -456,6 +458,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (command === "/mcp") {
       const servers = await this.options.agent.listMcpServers();
       output.write(formatMcpServers(servers));
+      return;
+    }
+
+    if (command === "/a2a") {
+      const peers = await this.options.agent.listA2APeers();
+      output.write(formatA2APeers(peers));
       return;
     }
 
@@ -1833,6 +1841,27 @@ function formatMcpServers(servers: McpServerSummary[]): string {
       : "";
     const error = server.error ? ` error=${server.error}` : "";
     lines.push(`  ${server.name} ${state} transport=${server.transport} status=${server.status}${tools} ${inventory}${permissions}${error}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatA2APeers(peers: A2APeerSummary[]): string {
+  if (peers.length === 0) {
+    return "A2A peers: (none registered)\n";
+  }
+  const lines = ["A2A peers:"];
+  for (const peer of peers) {
+    const state = peer.enabled ? "enabled" : "disabled";
+    const transport = peer.transport ? ` transport=${peer.transport}` : "";
+    const endpoint = peer.endpoint ? ` endpoint=${peer.endpoint}` : "";
+    const version = peer.version ? ` version=${peer.version}` : "";
+    const capabilities = peer.capabilities?.length
+      ? ` capabilities=${peer.capabilities.map((capability) => capability.name).join(",")}`
+      : "";
+    const error = peer.error ? ` error=${peer.error}` : "";
+    lines.push(
+      `  ${peer.name} ${state} status=${peer.status}${transport}${endpoint}${version}${capabilities}${error} id=${peer.id}`
+    );
   }
   return `${lines.join("\n")}\n`;
 }

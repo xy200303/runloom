@@ -59,6 +59,9 @@ export interface RunloomAgent {
   resolveApproval(approvalId: string, decision: ApprovalDecision): Promise<void>;
   getApprovalPolicy(): Promise<ApprovalPolicyConfig>;
   updateApprovalPolicy(patch: ApprovalPolicyPatch): Promise<ApprovalPolicyConfig>;
+  listExternalAgents(): Promise<ExternalAgentSummary[]>;
+  registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void>;
+  delegateExternalAgent(name: string, request: ExternalAgentDelegationRequest): Promise<ExternalAgentDelegationResult>;
   registerTool(tool: ToolDefinition): Promise<void>;
   registerProvider(provider: ModelProvider): Promise<void>;
   close(): Promise<void>;

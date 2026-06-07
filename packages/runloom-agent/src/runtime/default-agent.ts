@@ -13,6 +13,7 @@ import { GoogleGeminiProvider } from "../providers/google-gemini-provider.js";
 import { OpenAIChatCompletionsProvider } from "../providers/openai-chat-completions-provider.js";
 import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { redactText, redactValue } from "../security/redaction.js";
+import { resolveWorkspacePath } from "../security/path-guard.js";
 import { FileRuntimeStateStore } from "../sessions/file-runtime-state-store.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
 import { loadSkills, validateSkillDefinition } from "../skills/skill-manifest.js";
@@ -37,6 +38,8 @@ import type {
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
   ExternalAgentAdapter,
+  ExternalAgentDelegationRequest,
+  ExternalAgentDelegationResult,
   ExternalAgentSummary,
   ListAuditRecordsOptions,
   ListDeliverySummariesOptions,
@@ -634,6 +637,160 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void> {
     this.externalAgents.set(adapter.name, cloneExternalAgentAdapter(adapter));
+  }
+
+  async delegateExternalAgent(
+    name: string,
+    request: ExternalAgentDelegationRequest
+  ): Promise<ExternalAgentDelegationResult> {
+    const started = Date.now();
+    const runId = request.runId ?? `external_${randomUUID()}`;
+    const sessionId = request.sessionId ?? "global";
+    const adapter = this.externalAgents.get(name);
+
+    if (!adapter) {
+      return this.failExternalAgentDelegation(name, runId, sessionId, started, `External agent not registered: ${name}`, {
+        reason: "not_registered"
+      });
+    }
+
+    let normalizedRequest: ExternalAgentDelegationRequest;
+    try {
+      normalizedRequest = this.normalizeExternalAgentDelegationRequest(adapter, request);
+    } catch (error) {
+      return this.failExternalAgentDelegation(name, runId, sessionId, started, errorMessage(error), {
+        reason: "invalid_request",
+        error: errorToLogDetails(error)
+      });
+    }
+
+    this.emit("external_agent.delegated", "external_agent", runId, sessionId, {
+      name,
+      kind: adapter.kind,
+      workspace: normalizedRequest.workspace,
+      maxTurns: normalizedRequest.maxTurns,
+      constraints: normalizedRequest.constraints,
+      contextItems: normalizedRequest.context?.length ?? 0
+    });
+
+    if (adapter.enabled === false) {
+      return this.failExternalAgentDelegation(name, runId, sessionId, started, `External agent is disabled: ${name}`, {
+        reason: "disabled",
+        workspace: normalizedRequest.workspace
+      });
+    }
+
+    if (!adapter.delegate) {
+      return this.failExternalAgentDelegation(
+        name,
+        runId,
+        sessionId,
+        started,
+        `External agent delegate is not implemented: ${name}`,
+        {
+          reason: "delegate_missing",
+          workspace: normalizedRequest.workspace
+        }
+      );
+    }
+
+    try {
+      const result = await adapter.delegate(cloneExternalAgentDelegationRequest(normalizedRequest));
+      const safeResult = redactValue(cloneExternalAgentDelegationResult(result), { workspace: this.workspace });
+      const durationMs = Date.now() - started;
+      this.emit(
+        safeResult.status === "completed" ? "external_agent.completed" : "external_agent.failed",
+        "external_agent",
+        runId,
+        sessionId,
+        {
+          name,
+          durationMs,
+          result: safeResult
+        }
+      );
+      this.recordAudit({
+        action: "external_agent.delegated",
+        actor: "runtime",
+        summary: `External agent delegated: ${name}`,
+        runId,
+        sessionId,
+        details: {
+          name,
+          status: safeResult.status,
+          workspace: normalizedRequest.workspace,
+          maxTurns: normalizedRequest.maxTurns,
+          durationMs
+        }
+      });
+      return safeResult;
+    } catch (error) {
+      return this.failExternalAgentDelegation(name, runId, sessionId, started, errorMessage(error), {
+        reason: "delegate_failed",
+        workspace: normalizedRequest.workspace,
+        error: errorToLogDetails(error)
+      });
+    }
+  }
+
+  private normalizeExternalAgentDelegationRequest(
+    adapter: ExternalAgentAdapter,
+    request: ExternalAgentDelegationRequest
+  ): ExternalAgentDelegationRequest {
+    const task = request.task.trim();
+    if (!task) {
+      throw new RuntimeError("External agent delegation task is required.", {
+        code: "external_agent.task_required"
+      });
+    }
+
+    const adapterMaxTurns = normalizeExternalAgentMaxTurns(adapter.maxTurns);
+    const requestedMaxTurns = normalizeExternalAgentMaxTurns(request.maxTurns ?? adapterMaxTurns);
+    return {
+      task,
+      workspace: resolveWorkspacePath(this.workspace, request.workspace || "."),
+      runId: request.runId,
+      sessionId: request.sessionId,
+      maxTurns: Math.min(requestedMaxTurns, adapterMaxTurns),
+      constraints: request.constraints ? [...request.constraints] : undefined,
+      context: request.context ? request.context.map((item) => ({ ...item })) : undefined
+    };
+  }
+
+  private failExternalAgentDelegation(
+    name: string,
+    runId: string,
+    sessionId: string,
+    started: number,
+    message: string,
+    details: Record<string, unknown>
+  ): ExternalAgentDelegationResult {
+    const durationMs = Date.now() - started;
+    const result: ExternalAgentDelegationResult = {
+      status: "failed",
+      summary: message,
+      diagnostics: [message]
+    };
+    const safeResult = redactValue(result, { workspace: this.workspace });
+    this.emit("external_agent.failed", "external_agent", runId, sessionId, {
+      name,
+      durationMs,
+      result: safeResult
+    });
+    this.recordAudit({
+      action: "external_agent.delegated",
+      actor: "runtime",
+      summary: `External agent delegation failed: ${name}`,
+      runId,
+      sessionId,
+      details: {
+        name,
+        status: "failed",
+        durationMs,
+        ...details
+      }
+    });
+    return safeResult;
   }
 
   createMcpServer(options: CreateRunloomMcpServerOptions = {}): RunloomMcpServerAdapter {
@@ -2398,6 +2555,35 @@ function summarizeExternalAgent(adapter: ExternalAgentAdapter): ExternalAgentSum
     maxTurns: adapter.maxTurns,
     error: adapter.error
   };
+}
+
+function normalizeExternalAgentMaxTurns(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 3;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function cloneExternalAgentDelegationRequest(
+  request: ExternalAgentDelegationRequest
+): ExternalAgentDelegationRequest {
+  return {
+    ...request,
+    constraints: request.constraints ? [...request.constraints] : undefined,
+    context: request.context ? request.context.map((item) => ({ ...item })) : undefined
+  };
+}
+
+function cloneExternalAgentDelegationResult(result: ExternalAgentDelegationResult): ExternalAgentDelegationResult {
+  return {
+    ...result,
+    events: result.events ? result.events.map((event) => ({ ...event })) : undefined,
+    diagnostics: result.diagnostics ? [...result.diagnostics] : undefined
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function cloneMcpServerConfig(config: McpServerConfig): McpServerConfig {

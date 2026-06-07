@@ -1066,6 +1066,7 @@ export interface RunloomAgent {
   registerMcpServer(server: McpServerSummary): Promise<void>;
   listExternalAgents(): Promise<ExternalAgentSummary[]>;
   registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void>;
+  delegateExternalAgent(name: string, request: ExternalAgentDelegationRequest): Promise<ExternalAgentDelegationResult>;
   createMcpServer(options?: CreateRunloomMcpServerOptions): RunloomMcpServerAdapter;
   listApprovals(): Promise<ApprovalRequest[]>;
   listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;

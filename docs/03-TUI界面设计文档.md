@@ -136,7 +136,7 @@ TUI 不解析供应商原始 streaming event。
 - `Ctrl+C`：中止当前 run 或二次退出。
 - `Esc`：关闭弹窗。
 - `Ctrl+L`：清屏。
-- `PgUp/PgDn`：滚动 transcript。
+- `PgUp/PgDn`：滚动当前聚焦面板。
 - `Alt+1`：聚焦 transcript。
 - `Alt+2`：聚焦 todo。
 - `Alt+3`：聚焦 activity。
@@ -146,7 +146,7 @@ TUI 不解析供应商原始 streaming event。
 - `S`：批准当前 approval 并记住到当前 session。
 - `D`：拒绝当前 approval。
 
-首期 readline 模式下，`Ctrl+L`、`PgUp/PgDn`、`Alt+1/2/3` 和 Approval Center 的 `N/P/V/A/S/D` 通过 `/key <shortcut>` 复用同一套快捷键分发逻辑；后续全屏 raw-mode 接入真实按键时不改变面板状态语义。
+首期 readline 模式下，`Ctrl+L`、`PgUp/PgDn`、`Alt+1/2/3` 和 Approval Center 的 `N/P/V/A/S/D` 通过 `/key <shortcut>` 复用同一套快捷键分发逻辑；`PgUp/PgDn` 使用当前 focus 的面板滚动状态，后续全屏 raw-mode 接入真实按键时不改变面板状态语义。
 
 ## Approval 交互
 

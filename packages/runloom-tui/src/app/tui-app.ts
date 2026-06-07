@@ -705,9 +705,10 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (shortcut === "pgup" || shortcut === "pgdn") {
-      this.scrollPanel("transcript", shortcut === "pgup" ? "up" : "down", DEFAULT_PANEL_LINES);
+      const panel = this.viewState.focus;
+      this.scrollPanel(panel, shortcut === "pgup" ? "up" : "down", DEFAULT_PANEL_LINES);
       output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      output.write(formatTranscriptView(this.viewState.transcript, DEFAULT_PANEL_LINES, this.viewState.transcriptScrollOffset));
+      output.write(this.formatPanel(panel));
       return;
     }
 

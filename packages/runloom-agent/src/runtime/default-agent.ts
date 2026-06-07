@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { FileApprovalPolicyStore } from "../approvals/file-policy-store.js";
-import { applyApprovalPolicyPatch, createDefaultApprovalPolicy, getApprovalMode } from "../approvals/policy.js";
+import { applyApprovalPolicyPatch, createDefaultApprovalPolicy } from "../approvals/policy.js";
 import { A2APeerRuntime } from "../a2a/peer-runtime.js";
 import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-summary.js";
 import { loadRunloomConfig, selectModel } from "../config/runloom-config.js";
 import { ApprovalError, ProviderError, RuntimeError, ToolError } from "../errors.js";
 import { RunloomEventBus } from "../events/event-bus.js";
+import { ExternalAgentRuntime } from "../external-agents/runtime.js";
 import { loadMcpServerConfigs } from "../mcp/mcp-config.js";
 import { errorToLogDetails, emitLog } from "../observability/logger.js";
 import { AnthropicMessagesProvider } from "../providers/anthropic-messages-provider.js";
@@ -14,7 +15,6 @@ import { GoogleGeminiProvider } from "../providers/google-gemini-provider.js";
 import { OpenAIChatCompletionsProvider } from "../providers/openai-chat-completions-provider.js";
 import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { redactText, redactValue } from "../security/redaction.js";
-import { resolveWorkspacePath } from "../security/path-guard.js";
 import { FileRuntimeStateStore } from "../sessions/file-runtime-state-store.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
 import { loadSkills, validateSkillDefinition } from "../skills/skill-manifest.js";
@@ -45,7 +45,6 @@ import type {
   ExternalAgentAdapter,
   ExternalAgentDelegationRequest,
   ExternalAgentDelegationResult,
-  ExternalAgentOutputContract,
   ExternalAgentSummary,
   ListAuditRecordsOptions,
   ListDeliverySummariesOptions,
@@ -161,7 +160,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly skills = new Map<string, RunloomSkillSummary>();
   private readonly mcpServers = new Map<string, McpServerSummary>();
   private readonly a2aRuntime: A2APeerRuntime;
-  private readonly externalAgents = new Map<string, ExternalAgentAdapter>();
+  private readonly externalAgentRuntime: ExternalAgentRuntime;
   private readonly mcpServerConfigs = new Map<string, McpServerConfig>();
   private readonly discoveredMcpServers = new Set<string>();
   private readonly registeredMcpToolNames = new Set<string>();
@@ -200,6 +199,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
       logger: options.logger
     });
     this.a2aRuntime = new A2APeerRuntime({
+      workspace: this.workspace,
+      getApprovalPolicy: () => this.approvalPolicy,
+      saveApproval: (request) => this.store.saveApproval(request),
+      getApprovalDecision: (approvalId) => this.store.getApprovalDecision(approvalId),
+      emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
+      recordAudit: (input) => this.recordAudit(input)
+    });
+    this.externalAgentRuntime = new ExternalAgentRuntime({
       workspace: this.workspace,
       getApprovalPolicy: () => this.approvalPolicy,
       saveApproval: (request) => this.store.saveApproval(request),
@@ -657,300 +664,18 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async listExternalAgents(): Promise<ExternalAgentSummary[]> {
-    return [...this.externalAgents.values()]
-      .map(summarizeExternalAgent)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.externalAgentRuntime.listAgents();
   }
 
   async registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void> {
-    this.externalAgents.set(adapter.name, cloneExternalAgentAdapter(adapter));
+    await this.externalAgentRuntime.registerAgent(adapter);
   }
 
   async delegateExternalAgent(
     name: string,
     request: ExternalAgentDelegationRequest
   ): Promise<ExternalAgentDelegationResult> {
-    const started = Date.now();
-    const runId = request.runId ?? `external_${randomUUID()}`;
-    const sessionId = request.sessionId ?? "global";
-    const adapter = this.externalAgents.get(name);
-
-    if (!adapter) {
-      return this.failExternalAgentDelegation(name, runId, sessionId, started, `External agent not registered: ${name}`, {
-        reason: "not_registered"
-      });
-    }
-
-    let normalizedRequest: ExternalAgentDelegationRequest;
-    try {
-      normalizedRequest = this.normalizeExternalAgentDelegationRequest(adapter, request);
-    } catch (error) {
-      return this.failExternalAgentDelegation(name, runId, sessionId, started, errorMessage(error), {
-        reason: "invalid_request",
-        error: errorToLogDetails(error)
-      });
-    }
-
-    this.emit("external_agent.delegated", "external_agent", runId, sessionId, {
-      name,
-      kind: adapter.kind,
-      workspace: normalizedRequest.workspace,
-      maxTurns: normalizedRequest.maxTurns,
-      constraints: normalizedRequest.constraints,
-      expectedOutput: normalizedRequest.expectedOutput,
-      contextItems: normalizedRequest.context?.length ?? 0
-    });
-
-    if (adapter.enabled === false) {
-      return this.failExternalAgentDelegation(name, runId, sessionId, started, `External agent is disabled: ${name}`, {
-        reason: "disabled",
-        workspace: normalizedRequest.workspace
-      });
-    }
-
-    if (!adapter.delegate) {
-      return this.failExternalAgentDelegation(
-        name,
-        runId,
-        sessionId,
-        started,
-        `External agent delegate is not implemented: ${name}`,
-        {
-          reason: "delegate_missing",
-          workspace: normalizedRequest.workspace
-        }
-      );
-    }
-
-    const approvalResult = this.checkExternalAgentDelegationApproval(name, adapter, normalizedRequest, runId, sessionId);
-    if (approvalResult) {
-      return approvalResult;
-    }
-
-    try {
-      const result = await adapter.delegate(cloneExternalAgentDelegationRequest(normalizedRequest));
-      const contractedResult = applyExternalAgentOutputContract(result, normalizedRequest.expectedOutput);
-      const safeResult = redactValue(cloneExternalAgentDelegationResult(contractedResult), { workspace: this.workspace });
-      const durationMs = Date.now() - started;
-      for (const event of safeResult.events ?? []) {
-        this.emit("external_agent.event", "external_agent", runId, sessionId, {
-          name,
-          event
-        });
-      }
-      this.emit(
-        safeResult.status === "completed" ? "external_agent.completed" : "external_agent.failed",
-        "external_agent",
-        runId,
-        sessionId,
-        {
-          name,
-          durationMs,
-          result: safeResult
-        }
-      );
-      this.recordAudit({
-        action: "external_agent.delegated",
-        actor: "runtime",
-        summary: `External agent delegated: ${name}`,
-        runId,
-        sessionId,
-        details: {
-          name,
-          status: safeResult.status,
-          workspace: normalizedRequest.workspace,
-          maxTurns: normalizedRequest.maxTurns,
-          eventCount: safeResult.events?.length ?? 0,
-          durationMs
-        }
-      });
-      return safeResult;
-    } catch (error) {
-      return this.failExternalAgentDelegation(name, runId, sessionId, started, errorMessage(error), {
-        reason: "delegate_failed",
-        workspace: normalizedRequest.workspace,
-        error: errorToLogDetails(error)
-      });
-    }
-  }
-
-  private normalizeExternalAgentDelegationRequest(
-    adapter: ExternalAgentAdapter,
-    request: ExternalAgentDelegationRequest
-  ): ExternalAgentDelegationRequest {
-    const task = request.task.trim();
-    if (!task) {
-      throw new RuntimeError("External agent delegation task is required.", {
-        code: "external_agent.task_required"
-      });
-    }
-
-    const adapterMaxTurns = normalizeExternalAgentMaxTurns(adapter.maxTurns);
-    const requestedMaxTurns = normalizeExternalAgentMaxTurns(request.maxTurns ?? adapterMaxTurns);
-    return {
-      task,
-      workspace: resolveWorkspacePath(this.workspace, request.workspace || "."),
-      runId: request.runId,
-      sessionId: request.sessionId,
-      approvalId: request.approvalId,
-      maxTurns: Math.min(requestedMaxTurns, adapterMaxTurns),
-      constraints: request.constraints ? [...request.constraints] : undefined,
-      expectedOutput: request.expectedOutput ? cloneExternalAgentOutputContract(request.expectedOutput) : undefined,
-      context: request.context ? request.context.map((item) => ({ ...item })) : undefined
-    };
-  }
-
-  private checkExternalAgentDelegationApproval(
-    name: string,
-    adapter: ExternalAgentAdapter,
-    request: ExternalAgentDelegationRequest,
-    runId: string,
-    sessionId: string
-  ): ExternalAgentDelegationResult | undefined {
-    const mode = getApprovalMode(this.approvalPolicy, "external_agents");
-    const risk: ApprovalRequest["risk"] = "high";
-
-    if (request.approvalId) {
-      const decision = this.store.getApprovalDecision(request.approvalId);
-      if (!decision) {
-        return {
-          status: "waiting_approval",
-          summary: `External agent delegation is waiting for approval: ${name}`,
-          approvalId: request.approvalId
-        };
-      }
-      if (decision.decision === "denied") {
-        return this.cancelExternalAgentDelegationAfterDeniedApproval(name, request, runId, sessionId);
-      }
-      this.emit("external_agent.approved", "external_agent", runId, sessionId, {
-        name,
-        approvalId: request.approvalId
-      });
-      return undefined;
-    }
-
-    if (!requiresExternalAgentApproval(mode, risk)) {
-      return undefined;
-    }
-
-    const approval: ApprovalRequest = {
-      id: `approval_${randomUUID()}`,
-      runId,
-      sessionId,
-      scope: "external_agents",
-      action: `external_agent:${name}`,
-      risk,
-      mode,
-      summary: `Runloom wants to delegate to external agent ${name}.`,
-      details: {
-        name,
-        kind: adapter.kind,
-        task: request.task,
-        workspace: request.workspace,
-        maxTurns: request.maxTurns,
-        constraints: request.constraints,
-        expectedOutput: request.expectedOutput,
-        contextItems: request.context?.length ?? 0
-      }
-    };
-
-    this.store.saveApproval(approval);
-    this.emit("approval.requested", "approval", runId, sessionId, approval);
-    this.emit("external_agent.approval_requested", "external_agent", runId, sessionId, {
-      name,
-      approvalId: approval.id,
-      mode,
-      risk
-    });
-    this.recordAudit({
-      action: "external_agent.approval_requested",
-      actor: "runtime",
-      summary: `External agent delegation approval requested: ${name}`,
-      runId,
-      sessionId,
-      details: {
-        name,
-        approvalId: approval.id,
-        mode,
-        risk,
-        maxTurns: request.maxTurns,
-        expectedOutput: request.expectedOutput
-      }
-    });
-    return {
-      status: "waiting_approval",
-      summary: `External agent delegation is waiting for approval: ${name}`,
-      approvalId: approval.id
-    };
-  }
-
-  private cancelExternalAgentDelegationAfterDeniedApproval(
-    name: string,
-    request: ExternalAgentDelegationRequest,
-    runId: string,
-    sessionId: string
-  ): ExternalAgentDelegationResult {
-    const result: ExternalAgentDelegationResult = {
-      status: "cancelled",
-      summary: `External agent delegation denied: ${name}`,
-      approvalId: request.approvalId,
-      diagnostics: [`External agent delegation denied: ${name}`]
-    };
-    this.emit("external_agent.failed", "external_agent", runId, sessionId, {
-      name,
-      approvalId: request.approvalId,
-      result
-    });
-    this.recordAudit({
-      action: "external_agent.delegated",
-      actor: "runtime",
-      summary: `External agent delegation denied: ${name}`,
-      runId,
-      sessionId,
-      details: {
-        name,
-        status: "cancelled",
-        approvalId: request.approvalId,
-        maxTurns: request.maxTurns
-      }
-    });
-    return result;
-  }
-
-  private failExternalAgentDelegation(
-    name: string,
-    runId: string,
-    sessionId: string,
-    started: number,
-    message: string,
-    details: Record<string, unknown>
-  ): ExternalAgentDelegationResult {
-    const durationMs = Date.now() - started;
-    const result: ExternalAgentDelegationResult = {
-      status: "failed",
-      summary: message,
-      diagnostics: [message]
-    };
-    const safeResult = redactValue(result, { workspace: this.workspace });
-    this.emit("external_agent.failed", "external_agent", runId, sessionId, {
-      name,
-      durationMs,
-      result: safeResult
-    });
-    this.recordAudit({
-      action: "external_agent.delegated",
-      actor: "runtime",
-      summary: `External agent delegation failed: ${name}`,
-      runId,
-      sessionId,
-      details: {
-        name,
-        status: "failed",
-        durationMs,
-        ...details
-      }
-    });
-    return safeResult;
+    return this.externalAgentRuntime.delegateAgent(name, request);
   }
 
   createMcpServer(options: CreateRunloomMcpServerOptions = {}): RunloomMcpServerAdapter {
@@ -2693,140 +2418,6 @@ function cloneMcpServer(server: McpServerSummary): McpServerSummary {
     tools: server.tools ? [...server.tools] : undefined,
     permissions: server.permissions ? cloneMcpPermissions(server.permissions) : undefined
   };
-}
-
-function cloneExternalAgentAdapter(adapter: ExternalAgentAdapter): ExternalAgentAdapter {
-  return {
-    ...adapter,
-    capabilities: adapter.capabilities ? [...adapter.capabilities] : undefined
-  };
-}
-
-function summarizeExternalAgent(adapter: ExternalAgentAdapter): ExternalAgentSummary {
-  const enabled = adapter.enabled ?? true;
-  return {
-    name: adapter.name,
-    description: adapter.description,
-    kind: adapter.kind,
-    enabled,
-    status: adapter.status ?? (enabled ? "available" : "disabled"),
-    capabilities: adapter.capabilities ? [...adapter.capabilities] : undefined,
-    command: adapter.command,
-    maxTurns: adapter.maxTurns,
-    error: adapter.error
-  };
-}
-
-function normalizeExternalAgentMaxTurns(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return 3;
-  }
-  return Math.max(1, Math.floor(value));
-}
-
-function requiresExternalAgentApproval(mode: ApprovalRequest["mode"], risk: ApprovalRequest["risk"]): boolean {
-  if (mode === "full_access") {
-    return false;
-  }
-  if (mode === "ask") {
-    return true;
-  }
-  return risk === "high" || risk === "critical";
-}
-
-function cloneExternalAgentDelegationRequest(
-  request: ExternalAgentDelegationRequest
-): ExternalAgentDelegationRequest {
-  return {
-    ...request,
-    constraints: request.constraints ? [...request.constraints] : undefined,
-    expectedOutput: request.expectedOutput ? cloneExternalAgentOutputContract(request.expectedOutput) : undefined,
-    context: request.context ? request.context.map((item) => ({ ...item })) : undefined
-  };
-}
-
-function cloneExternalAgentDelegationResult(result: ExternalAgentDelegationResult): ExternalAgentDelegationResult {
-  return {
-    ...result,
-    changedFiles: result.changedFiles ? [...result.changedFiles] : undefined,
-    verificationNotes: result.verificationNotes ? [...result.verificationNotes] : undefined,
-    events: result.events ? result.events.map((event) => ({ ...event })) : undefined,
-    diagnostics: result.diagnostics ? [...result.diagnostics] : undefined
-  };
-}
-
-function cloneExternalAgentOutputContract(contract: ExternalAgentOutputContract): ExternalAgentOutputContract {
-  return {
-    ...contract,
-    schema: contract.schema ? { ...contract.schema } : undefined
-  };
-}
-
-function applyExternalAgentOutputContract(
-  result: ExternalAgentDelegationResult,
-  contract?: ExternalAgentOutputContract
-): ExternalAgentDelegationResult {
-  const cloned = cloneExternalAgentDelegationResult(result);
-  if (!contract || cloned.status !== "completed") {
-    return cloned;
-  }
-
-  const diagnostics = validateExternalAgentOutputContract(cloned, contract);
-  if (diagnostics.length === 0) {
-    return cloned;
-  }
-
-  return {
-    ...cloned,
-    status: "failed",
-    summary: `External agent output contract failed: ${diagnostics.join("; ")}`,
-    diagnostics: [...(cloned.diagnostics ?? []), ...diagnostics]
-  };
-}
-
-function validateExternalAgentOutputContract(
-  result: ExternalAgentDelegationResult,
-  contract: ExternalAgentOutputContract
-): string[] {
-  const diagnostics: string[] = [];
-  const outputText = result.outputText?.trim() ?? "";
-
-  if (contract.format === "summary" && !result.summary.trim()) {
-    diagnostics.push("summary output is required");
-  }
-  if (contract.format === "json" && result.structuredOutput === undefined && !isJsonText(outputText)) {
-    diagnostics.push("json output is required");
-  }
-  if (contract.format === "patch" && outputText.length === 0) {
-    diagnostics.push("patch output text is required");
-  }
-  if (contract.format === "report" && (!result.summary.trim() || outputText.length === 0)) {
-    diagnostics.push("report summary and output text are required");
-  }
-  if (contract.requireChangedFilesSummary && (!result.changedFiles || result.changedFiles.length === 0)) {
-    diagnostics.push("changed files summary is required");
-  }
-  if (contract.requireVerificationNotes && (!result.verificationNotes || result.verificationNotes.length === 0)) {
-    diagnostics.push("verification notes are required");
-  }
-
-  return diagnostics;
-}
-
-function isJsonText(text: string): boolean {
-  if (!text) {
-    return false;
-  }
-  try {
-    JSON.parse(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function cloneMcpServerConfig(config: McpServerConfig): McpServerConfig {

@@ -124,7 +124,7 @@ TUI 不解析供应商原始 streaming event。
 - `/stop`：取消当前 run。
 - `/resume`：恢复可恢复 run。
 - `/clear`：清空当前视图，不删除 session。
-- `/key <shortcut>`：分发 line-mode 快捷键入口，支持 `ctrl+l`、`pgup`、`pgdn`、`alt+1`、`alt+2`、`alt+3`、`n`、`p`、`v`、`a`、`s`、`d`。
+- `/key <shortcut>`：分发 line-mode 快捷键入口，支持 `ctrl+l`、`pgup`、`pgdn`、`home`、`end`、`alt+1`、`alt+2`、`alt+3`、`n`、`p`、`v`、`a`、`s`、`d`。
 - `/quit`：退出。
 
 命令处理只调用 agent API，不直接操作内部 store。
@@ -137,6 +137,7 @@ TUI 不解析供应商原始 streaming event。
 - `Esc`：关闭弹窗。
 - `Ctrl+L`：清屏。
 - `PgUp/PgDn`：滚动当前聚焦面板。
+- `Home/End`：跳到当前聚焦面板顶部/底部。
 - `Alt+1`：聚焦 transcript。
 - `Alt+2`：聚焦 todo。
 - `Alt+3`：聚焦 activity。
@@ -146,7 +147,7 @@ TUI 不解析供应商原始 streaming event。
 - `S`：批准当前 approval 并记住到当前 session。
 - `D`：拒绝当前 approval。
 
-首期 readline 模式下，`Ctrl+L`、`PgUp/PgDn`、`Alt+1/2/3` 和 Approval Center 的 `N/P/V/A/S/D` 通过 `/key <shortcut>` 复用同一套快捷键分发逻辑；`PgUp/PgDn` 使用当前 focus 的面板滚动状态，后续全屏 raw-mode 接入真实按键时不改变面板状态语义。
+首期 readline 模式下，`Ctrl+L`、`PgUp/PgDn`、`Home/End`、`Alt+1/2/3` 和 Approval Center 的 `N/P/V/A/S/D` 通过 `/key <shortcut>` 复用同一套快捷键分发逻辑；`PgUp/PgDn` 与 `Home/End` 使用当前 focus 的面板滚动状态，后续全屏 raw-mode 接入真实按键时不改变面板状态语义。
 
 ## Approval 交互
 

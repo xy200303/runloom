@@ -26,7 +26,21 @@ const COMPOSITE_PANEL_LINES = 8;
 
 type TuiPanel = "status" | "transcript" | "todo" | "activity";
 type ScrollAction = "up" | "down" | "top" | "bottom";
-type TuiShortcut = "ctrl+l" | "pgup" | "pgdn" | "alt+1" | "alt+2" | "alt+3" | "n" | "p" | "v" | "a" | "s" | "d";
+type TuiShortcut =
+  | "ctrl+l"
+  | "pgup"
+  | "pgdn"
+  | "home"
+  | "end"
+  | "alt+1"
+  | "alt+2"
+  | "alt+3"
+  | "n"
+  | "p"
+  | "v"
+  | "a"
+  | "s"
+  | "d";
 type ApprovalShortcut = Extract<TuiShortcut, "n" | "p" | "v" | "a" | "s" | "d">;
 type ActivityCategory = "runs" | "models" | "todos" | "coding" | "tools" | "approvals" | "reviews" | "skills" | "mcp";
 
@@ -707,6 +721,14 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (shortcut === "pgup" || shortcut === "pgdn") {
       const panel = this.viewState.focus;
       this.scrollPanel(panel, shortcut === "pgup" ? "up" : "down", DEFAULT_PANEL_LINES);
+      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+      output.write(this.formatPanel(panel));
+      return;
+    }
+
+    if (shortcut === "home" || shortcut === "end") {
+      const panel = this.viewState.focus;
+      this.scrollPanel(panel, shortcut === "home" ? "top" : "bottom", DEFAULT_PANEL_LINES);
       output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
       output.write(this.formatPanel(panel));
       return;
@@ -2066,7 +2088,7 @@ function formatActivityCommandHelp(): string {
 }
 
 function formatShortcutCommandHelp(): string {
-  return "Usage: /key <ctrl+l|pgup|pgdn|alt+1|alt+2|alt+3|n|p|v|a|s|d> [deny-reason]\n";
+  return "Usage: /key <ctrl+l|pgup|pgdn|home|end|alt+1|alt+2|alt+3|n|p|v|a|s|d> [deny-reason]\n";
 }
 
 function parseActivityCategory(value: string): ActivityCategory | undefined {
@@ -2111,6 +2133,12 @@ function normalizeShortcut(value: string): TuiShortcut | undefined {
   if (normalized === "pgdn" || normalized === "pagedown") {
     return "pgdn";
   }
+  if (normalized === "home") {
+    return "home";
+  }
+  if (normalized === "end") {
+    return "end";
+  }
   if (normalized === "alt+1" || normalized === "option+1") {
     return "alt+1";
   }
@@ -2149,6 +2177,10 @@ function formatShortcutLabel(shortcut: TuiShortcut): string {
       return "PgUp";
     case "pgdn":
       return "PgDn";
+    case "home":
+      return "Home";
+    case "end":
+      return "End";
     case "alt+1":
       return "Alt+1";
     case "alt+2":

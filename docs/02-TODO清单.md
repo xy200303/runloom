@@ -132,7 +132,7 @@
 - [~] approval 弹窗：已实现 Approval Center、`/approvals next|prev|view|focus`、`/approve selected` remember/mode 选项、`/deny selected` reason 和 `/key n|p|v|a|s|d` line-mode 快捷处理；仍需弹窗/真实 raw-key UI。
 - [~] `/permissions` 权限审批设置面板：已实现完整 scope 表和 `/permissions set` 命令式修改；仍需全屏设置 UI。
 - [x] 基础命令：已实现 `/help`、`/status`、`/view`、`/transcript`、`/activity`、`/focus`、`/scroll`、`/clear`、`/key`、`/replay`、`/permissions`、`/permissions set`、`/approval`、`/approvals`、`/approvals view`、`/approve`、`/deny`、`/tools`、`/model`、`/session`、`/todo`、`/diff`、`/review`、`/git`、`/tests`、`/stop`、`/resume`、`/skills`、`/mcp`、`/quit`。
-- [~] 事件回放和滚动：已支持 `/replay` 从 stored events 重建面板，`/session switch` 自动按目标 session 回放，并支持 `/clear` 清空当前视图、`/key` 分发 `Ctrl+L`、`Enter` 默认动作、`Tab/Shift+Tab` 面板轮转、按当前 focus 滚动的 `PgUp/PgDn`、`Home/End`、`Alt+1/2/3/4` 和 Approval Center 快捷键、`/focus`、`/scroll` 命令式面板滚动；仍需真实 raw-key 捕获。
+- [~] 事件回放和滚动：已支持 `/replay` 从 stored events 重建面板，`/session switch` 自动按目标 session 回放，并支持 `/clear` 清空当前视图、`/key` 分发 `Ctrl+L`、`Esc` 回到 transcript、`Enter` 默认动作、`Tab/Shift+Tab` 面板轮转、按当前 focus 滚动的 `PgUp/PgDn`、`Home/End`、`Alt+1/2/3/4` 和 Approval Center 快捷键、`/focus`、`/scroll` 命令式面板滚动；仍需真实 raw-key 捕获。
 
 验收标准：
 

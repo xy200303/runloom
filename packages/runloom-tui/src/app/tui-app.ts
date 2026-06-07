@@ -29,6 +29,7 @@ type TuiPanel = "status" | "transcript" | "todo" | "activity";
 type ScrollAction = "up" | "down" | "top" | "bottom";
 type TuiShortcut =
   | "ctrl+l"
+  | "esc"
   | "enter"
   | "tab"
   | "shift+tab"
@@ -720,6 +721,15 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       this.clearViewState({ preserveActiveRun: true, preserveLatestModel: true });
       output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
       output.write("View cleared\n");
+      return;
+    }
+
+    if (shortcut === "esc") {
+      this.focusedApprovalId = undefined;
+      this.viewState.focus = "transcript";
+      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
+      output.write("Focus set to transcript\n");
+      output.write(this.formatPanel("transcript"));
       return;
     }
 
@@ -2125,7 +2135,7 @@ function formatActivityCommandHelp(): string {
 }
 
 function formatShortcutCommandHelp(): string {
-  return "Usage: /key <ctrl+l|enter|tab|shift+tab|pgup|pgdn|home|end|alt+1|alt+2|alt+3|alt+4|n|p|v|a|s|d> [deny-reason]\n";
+  return "Usage: /key <ctrl+l|esc|enter|tab|shift+tab|pgup|pgdn|home|end|alt+1|alt+2|alt+3|alt+4|n|p|v|a|s|d> [deny-reason]\n";
 }
 
 function parseActivityCategory(value: string): ActivityCategory | undefined {
@@ -2163,6 +2173,9 @@ function normalizeShortcut(value: string): TuiShortcut | undefined {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "");
   if (normalized === "ctrl+l" || normalized === "control+l") {
     return "ctrl+l";
+  }
+  if (normalized === "esc" || normalized === "escape") {
+    return "esc";
   }
   if (normalized === "enter" || normalized === "return") {
     return "enter";
@@ -2222,6 +2235,8 @@ function formatShortcutLabel(shortcut: TuiShortcut): string {
   switch (shortcut) {
     case "ctrl+l":
       return "Ctrl+L";
+    case "esc":
+      return "Esc";
     case "enter":
       return "Enter";
     case "tab":

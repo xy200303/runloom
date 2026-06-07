@@ -1229,7 +1229,7 @@ test("approved MCP tools call the adapter and emit MCP call events", async () =>
   }
 });
 
-test("skills and MCP servers can be registered without product mock data", async () => {
+test("skills, MCP servers, and external agents can be registered without product mock data", async () => {
   const agent = await createRunloomAgent({
     provider: "openai-responses",
     model: "gpt-4.1",
@@ -1239,6 +1239,7 @@ test("skills and MCP servers can be registered without product mock data", async
 
   assert.deepEqual(await agent.listSkills(), []);
   assert.deepEqual(await agent.listMcpServers(), []);
+  assert.deepEqual(await agent.listExternalAgents(), []);
 
   await agent.registerSkill({
     name: "typescript-code-review",
@@ -1258,14 +1259,28 @@ test("skills and MCP servers can be registered without product mock data", async
     resources: 0,
     prompts: 0
   });
+  await agent.registerExternalAgent({
+    name: "codex",
+    description: "Codex CLI",
+    kind: "local_cli",
+    enabled: true,
+    status: "available",
+    capabilities: ["code_review", "edit"],
+    command: "codex",
+    maxTurns: 3
+  });
 
   const skills = await agent.listSkills();
   const servers = await agent.listMcpServers();
+  const externalAgents = await agent.listExternalAgents();
 
   assert.equal(skills[0].name, "typescript-code-review");
   assert.deepEqual(skills[0].requiredTools, ["fs.read", "git.diff"]);
   assert.equal(servers[0].name, "workspace");
   assert.equal(servers[0].transport, "stdio");
+  assert.equal(externalAgents[0].name, "codex");
+  assert.deepEqual(externalAgents[0].capabilities, ["code_review", "edit"]);
+  assert.equal(externalAgents[0].command, "codex");
   await agent.close();
 });
 

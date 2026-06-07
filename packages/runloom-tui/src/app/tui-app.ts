@@ -7,6 +7,7 @@ import type {
   ApprovalMode,
   ApprovalPolicyConfig,
   ApprovalRequest,
+  ExternalAgentSummary,
   McpServerSummary,
   PermissionScope,
   RunloomAgent,
@@ -313,6 +314,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
           "  /resume        Resume a previous run",
           "  /skills        List registered skills",
           "  /mcp           List MCP servers",
+          "  /external      List external agent adapters",
           "  /git           Show git status",
           "  /tests         Run verification command",
           "  /quit          Exit"
@@ -444,6 +446,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     if (command === "/mcp") {
       const servers = await this.options.agent.listMcpServers();
       output.write(formatMcpServers(servers));
+      return;
+    }
+
+    if (command === "/external") {
+      const agents = await this.options.agent.listExternalAgents();
+      output.write(formatExternalAgents(agents));
       return;
     }
 
@@ -1813,6 +1821,24 @@ function formatMcpServers(servers: McpServerSummary[]): string {
       : "";
     const error = server.error ? ` error=${server.error}` : "";
     lines.push(`  ${server.name} ${state} transport=${server.transport} status=${server.status}${tools} ${inventory}${permissions}${error}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatExternalAgents(agents: ExternalAgentSummary[]): string {
+  if (agents.length === 0) {
+    return "External agents: (none registered)\n";
+  }
+  const lines = ["External agents:"];
+  for (const agent of agents) {
+    const state = agent.enabled ? "enabled" : "disabled";
+    const capabilities = agent.capabilities?.length ? ` capabilities=${agent.capabilities.join(",")}` : "";
+    const command = agent.command ? ` command=${agent.command}` : "";
+    const maxTurns = agent.maxTurns ? ` maxTurns=${agent.maxTurns}` : "";
+    const error = agent.error ? ` error=${agent.error}` : "";
+    lines.push(
+      `  ${agent.name} ${state} kind=${agent.kind} status=${agent.status}${capabilities}${command}${maxTurns}${error} - ${agent.description}`
+    );
   }
   return `${lines.join("\n")}\n`;
 }

@@ -36,6 +36,8 @@ import type {
   CreateRunloomSkillProposalOptions,
   CreateRunloomAgentOptions,
   ExecuteToolOptions,
+  ExternalAgentAdapter,
+  ExternalAgentSummary,
   ListAuditRecordsOptions,
   ListDeliverySummariesOptions,
   ListDiffRecordsOptions,
@@ -149,6 +151,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly tools = new Map<string, ToolDefinition>();
   private readonly skills = new Map<string, RunloomSkillSummary>();
   private readonly mcpServers = new Map<string, McpServerSummary>();
+  private readonly externalAgents = new Map<string, ExternalAgentAdapter>();
   private readonly mcpServerConfigs = new Map<string, McpServerConfig>();
   private readonly discoveredMcpServers = new Set<string>();
   private readonly registeredMcpToolNames = new Set<string>();
@@ -621,6 +624,16 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async registerMcpServer(server: McpServerSummary): Promise<void> {
     this.mcpServers.set(server.name, cloneMcpServer(server));
+  }
+
+  async listExternalAgents(): Promise<ExternalAgentSummary[]> {
+    return [...this.externalAgents.values()]
+      .map(summarizeExternalAgent)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void> {
+    this.externalAgents.set(adapter.name, cloneExternalAgentAdapter(adapter));
   }
 
   createMcpServer(options: CreateRunloomMcpServerOptions = {}): RunloomMcpServerAdapter {
@@ -2362,6 +2375,28 @@ function cloneMcpServer(server: McpServerSummary): McpServerSummary {
     ...server,
     tools: server.tools ? [...server.tools] : undefined,
     permissions: server.permissions ? cloneMcpPermissions(server.permissions) : undefined
+  };
+}
+
+function cloneExternalAgentAdapter(adapter: ExternalAgentAdapter): ExternalAgentAdapter {
+  return {
+    ...adapter,
+    capabilities: adapter.capabilities ? [...adapter.capabilities] : undefined
+  };
+}
+
+function summarizeExternalAgent(adapter: ExternalAgentAdapter): ExternalAgentSummary {
+  const enabled = adapter.enabled ?? true;
+  return {
+    name: adapter.name,
+    description: adapter.description,
+    kind: adapter.kind,
+    enabled,
+    status: adapter.status ?? (enabled ? "available" : "disabled"),
+    capabilities: adapter.capabilities ? [...adapter.capabilities] : undefined,
+    command: adapter.command,
+    maxTurns: adapter.maxTurns,
+    error: adapter.error
   };
 }
 

@@ -334,6 +334,60 @@ export interface ListSkillProposalsOptions {
   limit?: number;
 }
 
+export type ExternalAgentAdapterKind = "local_cli" | "sdk" | "a2a" | "custom";
+
+export type ExternalAgentAdapterStatus = "disabled" | "available" | "unavailable" | "error";
+
+export interface ExternalAgentContextItem {
+  kind: "text" | "file" | "diff" | "diagnostic";
+  title?: string;
+  text?: string;
+  path?: string;
+}
+
+export interface ExternalAgentDelegationRequest {
+  task: string;
+  workspace: string;
+  sessionId?: string;
+  runId?: string;
+  maxTurns?: number;
+  constraints?: string[];
+  context?: ExternalAgentContextItem[];
+}
+
+export interface ExternalAgentDelegationResult {
+  status: "completed" | "failed" | "cancelled";
+  summary: string;
+  outputText?: string;
+  events?: RunloomEvent[];
+  diagnostics?: string[];
+}
+
+export interface ExternalAgentAdapter {
+  name: string;
+  description: string;
+  kind: ExternalAgentAdapterKind;
+  enabled?: boolean;
+  status?: ExternalAgentAdapterStatus;
+  capabilities?: string[];
+  command?: string;
+  maxTurns?: number;
+  error?: string;
+  delegate?: (request: ExternalAgentDelegationRequest) => Promise<ExternalAgentDelegationResult>;
+}
+
+export interface ExternalAgentSummary {
+  name: string;
+  description: string;
+  kind: ExternalAgentAdapterKind;
+  enabled: boolean;
+  status: ExternalAgentAdapterStatus;
+  capabilities?: string[];
+  command?: string;
+  maxTurns?: number;
+  error?: string;
+}
+
 export interface McpServerSummary {
   name: string;
   enabled: boolean;
@@ -1010,6 +1064,8 @@ export interface RunloomAgent {
   approveSkillProposal(proposalId: string, decision?: ApprovalDecision): Promise<RunloomSkillProposal>;
   listMcpServers(): Promise<McpServerSummary[]>;
   registerMcpServer(server: McpServerSummary): Promise<void>;
+  listExternalAgents(): Promise<ExternalAgentSummary[]>;
+  registerExternalAgent(adapter: ExternalAgentAdapter): Promise<void>;
   createMcpServer(options?: CreateRunloomMcpServerOptions): RunloomMcpServerAdapter;
   listApprovals(): Promise<ApprovalRequest[]>;
   listAuditRecords(options?: ListAuditRecordsOptions): Promise<RunloomAuditRecord[]>;

@@ -1454,6 +1454,7 @@ function formatStatusView(state: TuiViewState, context: TuiViewContext): string 
     `  session: ${context.activeSessionId ?? "(none)"}`,
     `  run: ${context.activeRunId ?? "(none)"} status=${state.runStatus}`,
     `  focus: ${state.focus}`,
+    `  scroll: transcript=${state.transcriptScrollOffset}, todo=${state.todoScrollOffset}, activity=${state.activityScrollOffset}`,
     `  model: ${formatStatusModel(state, context)}`,
     `  taskType: ${context.activeTaskType ?? "(auto)"}`,
     `  language: ${context.activeLanguage ?? "(auto)"}`,

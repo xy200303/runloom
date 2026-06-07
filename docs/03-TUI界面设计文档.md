@@ -92,7 +92,7 @@ TUI 不解析供应商原始 streaming event。
 基础命令：
 
 - `/help`：显示命令。
-- `/status`：runtime、model、tool、store、权限状态。
+- `/status`：runtime、model、tool、store、权限状态，以及当前 focus 和 panel scroll offsets。
 - `/model`：显示当前 provider/model。
 - `/model set <provider/model>`：切换模型。
 - `/session`：显示当前 session。

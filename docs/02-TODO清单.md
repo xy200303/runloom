@@ -127,7 +127,7 @@
 
 - [x] CLI bin：`runloom`。
 - [x] 嵌入式 TUI API：`createRunloomTuiApp`。
-- [~] transcript 区、输入区、todo 区、tool activity 区、status 区：已建立命令式 view-state panel、焦点切换和面板滚动；仍需完整全屏布局。
+- [~] transcript 区、输入区、todo 区、tool activity 区、status 区：已建立命令式 view-state panel、焦点切换、面板滚动和 status scroll offset 展示；仍需完整全屏布局。
 - [~] coding activity 展示：已通过命令展示 diff、测试命令、git 状态、todo、activity panel、`/activity` 分类过滤、`/activity view` 详情、当前可见 activity 详情锚点，并将 TUI 主动触发的 `/git`、`/diff`、`/tests` 结果记录进 coding activity；仍需完整 activity panel 交互。
 - [~] approval 弹窗：已实现 Approval Center、`/approvals next|prev|view|focus`、`/approve selected` remember/mode 选项、`/deny selected` reason 和 `/key n|p|v|a|s|d` line-mode 快捷处理；仍需弹窗/真实 raw-key UI。
 - [~] `/permissions` 权限审批设置面板：已实现完整 scope 表和 `/permissions set` 命令式修改；仍需全屏设置 UI。

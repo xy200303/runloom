@@ -175,6 +175,20 @@ describe("external agent adapters", () => {
             outputText: `Reviewed workspace ${request.workspace}`,
             changedFiles: ["packages/runloom-agent/src/types.ts"],
             verificationNotes: ["unit tests passed"],
+            events: [
+              {
+                id: "evt_external_step",
+                type: "external.step",
+                runId: "run_external",
+                sessionId: "ses_external",
+                sequence: 1,
+                timestamp: "2026-01-01T00:00:00.000Z",
+                source: "external_agent",
+                payload: {
+                  message: `Read workspace ${request.workspace}`
+                }
+              }
+            ],
             diagnostics: ["ok"]
           };
         }
@@ -219,6 +233,7 @@ describe("external agent adapters", () => {
         context: [{ kind: "text", title: "Scope", text: "Focus on public API." }]
       });
       expect(eventTypes).toContain("external_agent.delegated");
+      expect(eventTypes).toContain("external_agent.event");
       expect(eventTypes).toContain("external_agent.completed");
       expect(eventTypes).toContain("audit.recorded");
       expect(auditRecords[0]).toMatchObject({
@@ -231,7 +246,8 @@ describe("external agent adapters", () => {
       expect(auditRecords[0]?.details).toMatchObject({
         name: "team-reviewer",
         status: "completed",
-        maxTurns: 2
+        maxTurns: 2,
+        eventCount: 1
       });
     } finally {
       await agent.close();

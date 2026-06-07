@@ -181,7 +181,7 @@
 - [~] Claude Code adapter：已提供 `createClaudeCodeExternalAgentAdapter(...)` public descriptor factory，支持 host 注册 Claude Code CLI adapter；委托执行仍待实现。
 - [x] 其他本地 coding agent adapter 扩展点：已提供 `createLocalCliExternalAgentAdapter(...)` public descriptor factory，供 host 注册团队内部或第三方本地 CLI coding agent。
 - [x] 外部委托的 workspace、权限、最大轮数、输出格式限制：已提供 `delegateExternalAgent(...)` public API，对 workspace/maxTurns 做归一化，接入 `external_agents` approval policy，并验证基础 output contract。
-- [~] 委托事件、日志和 audit trail：`delegateExternalAgent(...)` 已写入 approval/delegated/completed/failed external events 和 audit record；完整日志串流仍待实现。
+- [~] 委托事件、日志和 audit trail：`delegateExternalAgent(...)` 已写入 approval/delegated/event/completed/failed external events、转发 adapter result events，并写入 audit record；完整流式日志仍待实现。
 - [ ] A2A discovery、capability、delegation、result exchange。
 
 验收标准：

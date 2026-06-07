@@ -706,6 +706,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
       const contractedResult = applyExternalAgentOutputContract(result, normalizedRequest.expectedOutput);
       const safeResult = redactValue(cloneExternalAgentDelegationResult(contractedResult), { workspace: this.workspace });
       const durationMs = Date.now() - started;
+      for (const event of safeResult.events ?? []) {
+        this.emit("external_agent.event", "external_agent", runId, sessionId, {
+          name,
+          event
+        });
+      }
       this.emit(
         safeResult.status === "completed" ? "external_agent.completed" : "external_agent.failed",
         "external_agent",
@@ -728,6 +734,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
           status: safeResult.status,
           workspace: normalizedRequest.workspace,
           maxTurns: normalizedRequest.maxTurns,
+          eventCount: safeResult.events?.length ?? 0,
           durationMs
         }
       });

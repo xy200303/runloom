@@ -6,7 +6,7 @@ Codex、Claude Code 等外部 coding agent 不属于 `ModelProvider`。它们不
 
 Runloom 通过 `ExternalAgentAdapter`、subagent 和 A2A peer 接入它们。
 
-当前首期已落地最小 public surface：`runloom-agent` 暴露 external agent adapter/summary/delegation/output contract 类型，以及 `registerExternalAgent(...)`、`listExternalAgents()`、`delegateExternalAgent(...)`；TUI 通过 `/external` 展示真实注册状态。委托入口已做 workspace/maxTurns 归一化，接入 `external_agents` approval policy，验证基础 output contract，并写入 external agent 事件和 audit；日志串流和 adapter 具体执行仍按本文后续设计推进。
+当前首期已落地最小 public surface：`runloom-agent` 暴露 external agent adapter/summary/delegation/output contract 类型，以及 `registerExternalAgent(...)`、`listExternalAgents()`、`delegateExternalAgent(...)`；TUI 通过 `/external` 展示真实注册状态。委托入口已做 workspace/maxTurns 归一化，接入 `external_agents` approval policy，验证基础 output contract，转发 adapter result events，并写入 external agent 事件和 audit；流式日志和 adapter 具体执行仍按本文后续设计推进。
 
 ## 设计目标
 

@@ -891,8 +891,17 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       this.activityRecords(category),
       this.viewState.activityRecords,
       category,
-      target
+      target,
+      this.currentActivityVisibleIndex(category)
     );
+  }
+
+  private currentActivityVisibleIndex(category?: ActivityCategory): number | undefined {
+    const records = this.activityRecords(category);
+    if (records.length === 0) {
+      return undefined;
+    }
+    return visibleSlice(records, DEFAULT_PANEL_LINES, this.viewState.activityScrollOffset).start;
   }
 
   private viewContext(): TuiViewContext {
@@ -1447,14 +1456,15 @@ function formatActivityDetail(
   records: TuiActivityRecord[],
   allRecords: TuiActivityRecord[],
   category?: ActivityCategory,
-  targetText?: string
+  targetText?: string,
+  currentIndex?: number
 ): string {
   const title = category ? `Activity Detail (${category})` : "Activity Detail";
   if (records.length === 0) {
     return `${title}: (none)\n`;
   }
 
-  const resolved = resolveActivityDetailTarget(records, targetText);
+  const resolved = resolveActivityDetailTarget(records, targetText, currentIndex);
   if ("error" in resolved) {
     return `${resolved.error}\n${formatActivityCommandHelp()}`;
   }
@@ -1478,11 +1488,17 @@ function formatActivityDetail(
 
 function resolveActivityDetailTarget(
   records: TuiActivityRecord[],
-  targetText?: string
+  targetText?: string,
+  currentIndex?: number
 ): { record: TuiActivityRecord; index: number } | { error: string } {
-  const target = targetText?.toLowerCase() ?? "latest";
-  if (target === "latest" || target === "last" || target === "current" || target === ".") {
+  const target = targetText?.trim().toLowerCase();
+  if (!target || target === "latest" || target === "last") {
     const index = records.length - 1;
+    return { record: records[index], index };
+  }
+
+  if (target === "current" || target === "selected" || target === "." || target === "visible") {
+    const index = clamp(currentIndex ?? records.length - 1, 0, records.length - 1);
     return { record: records[index], index };
   }
 
@@ -2043,8 +2059,8 @@ function formatActivityCommandHelp(): string {
   return [
     "Usage:",
     "  /activity [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [up|down|top|bottom] [lines]",
-    "  /activity view [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [index|latest]",
-    "  /activity <filter> view [index|latest]"
+    "  /activity view [all|runs|models|todos|coding|tools|approvals|reviews|skills|mcp] [index|latest|current]",
+    "  /activity <filter> view [index|latest|current]"
   ].join("\n") + "\n";
 }
 

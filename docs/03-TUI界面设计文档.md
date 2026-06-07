@@ -100,7 +100,7 @@ TUI 不解析供应商原始 streaming event。
 - `/session switch <id>`：切换 session。
 - `/todo`：显示 todo。
 - `/activity [filter]`：显示 activity，可按 `runs`、`models`、`todos`、`coding`、`tools`、`approvals`、`reviews`、`skills`、`mcp` 过滤。
-- `/activity view [filter] [index|latest]`：查看 activity 详情，包括事件类型、run/session、source、timestamp 和 payload。
+- `/activity view [filter] [index|latest|current]`：查看 activity 详情，包括事件类型、run/session、source、timestamp 和 payload；`current`、`selected` 或 `.` 指向当前滚动窗口顶部可见项。
 - `/tools`：显示可用工具。
 - `/diff`：显示当前 run 产生的 diff 摘要。
 - `/git`：显示当前 workspace git 状态。
@@ -247,7 +247,7 @@ TUI 需要把编程开发活动作为一等状态展示：
 - Git 状态：当前分支、dirty files、用户未提交改动风险。
 - Review：发现的问题、严重程度、文件位置和建议验证方式。
 
-首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp` 和 `/activity view ...`。`/git`、`/diff`、`/tests` 这类由用户在 TUI 主动触发的 public tool API 结果也会记录到 `coding` activity，所有过滤与详情视图仍只消费 TUI view state。
+首期命令式界面支持 `/activity runs|models|todos|coding|tools|approvals|reviews|skills|mcp` 和 `/activity view ...`。详情视图支持按编号、`latest` 或当前滚动窗口顶部可见项展开。`/git`、`/diff`、`/tests` 这类由用户在 TUI 主动触发的 public tool API 结果也会记录到 `coding` activity，所有过滤与详情视图仍只消费 TUI view state。
 
 原则：
 

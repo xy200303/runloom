@@ -515,6 +515,7 @@ test("approval command updates scope and default modes", async () => {
   await app.runCommand("/scroll bottom");
   await app.runCommand("/focus activity");
   await app.runCommand("/scroll top");
+  await app.runCommand("/activity view current");
   await app.runCommand("/key alt+1");
   await app.runCommand("/key pgup");
   await app.runCommand("/key pgdn");
@@ -600,6 +601,7 @@ test("approval command updates scope and default modes", async () => {
   assert.match(text, /assistant: Scroll response 24\./);
   assert.match(text, /Focus set to activity/);
   assert.match(text, /Activity: showing 1-20 of 33 offset=13/);
+  assert.match(text, /Activity Detail: #1\n {2}category: coding\n {2}filteredIndex: 1\n {2}event: tool\.git\.status/);
   assert.match(text, /Shortcut Alt\+1\nFocus set to transcript/);
   assert.match(text, /Shortcut PgUp\nTranscript: showing 1-20 of 27 offset=7/);
   assert.match(text, /Shortcut PgDn\nTranscript: showing 8-27 of 27/);

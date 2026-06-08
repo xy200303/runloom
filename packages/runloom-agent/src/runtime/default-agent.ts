@@ -4,17 +4,14 @@ import { FileApprovalPolicyStore } from "../approvals/file-policy-store.js";
 import { applyApprovalPolicyPatch, createDefaultApprovalPolicy } from "../approvals/policy.js";
 import { A2APeerRuntime } from "../a2a/peer-runtime.js";
 import { buildWorkspaceContext, inspectWorkspace } from "../coding/workspace-summary.js";
-import { loadRunloomConfig, selectModel } from "../config/runloom-config.js";
+import { loadRunloomConfig } from "../config/runloom-config.js";
 import { ApprovalError, ProviderError, RuntimeError, ToolError } from "../errors.js";
 import { RunloomEventBus } from "../events/event-bus.js";
 import { ExternalAgentRuntime } from "../external-agents/runtime.js";
 import { ConfiguredMcpRuntime } from "../mcp/runtime.js";
 import { RunloomMcpServerRuntime } from "../mcp/server-runtime.js";
 import { errorToLogDetails, emitLog } from "../observability/logger.js";
-import { AnthropicMessagesProvider } from "../providers/anthropic-messages-provider.js";
-import { GoogleGeminiProvider } from "../providers/google-gemini-provider.js";
-import { OpenAIChatCompletionsProvider } from "../providers/openai-chat-completions-provider.js";
-import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
+import { ModelProviderRegistry } from "../providers/registry.js";
 import { redactText, redactValue } from "../security/redaction.js";
 import { FileRuntimeStateStore } from "../sessions/file-runtime-state-store.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
@@ -89,16 +86,6 @@ import type {
 } from "../types.js";
 
 const MAX_MODEL_TOOL_STEPS = 8;
-const PROVIDER_ALIASES: Record<string, string> = {
-  openai: "openai-responses",
-  "openai-chat": "openai-chat-completions",
-  chat: "openai-chat-completions",
-  anthropic: "anthropic-messages",
-  claude: "anthropic-messages",
-  google: "google-gemini",
-  gemini: "google-gemini"
-};
-
 interface ModelToolCall {
   toolCallId: string;
   name: string;
@@ -131,7 +118,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly workspace: string;
   private readonly bus: RunloomEventBus;
   private readonly store: InMemorySessionStore;
-  private readonly providers = new Map<string, ModelProvider>();
+  private readonly providerRegistry: ModelProviderRegistry;
   private readonly tools = new Map<string, ToolDefinition>();
   private readonly skillRuntime: SkillRuntime;
   private readonly mcpRuntime: ConfiguredMcpRuntime;
@@ -160,6 +147,13 @@ export class DefaultRunloomAgent implements RunloomAgent {
     this.approvalPolicy = this.loadInitialApprovalPolicy(options.approvalPolicy);
     this.config = loadRunloomConfig({
       stateDir: options.stateDir,
+      workspace: this.workspace
+    });
+    this.providerRegistry = new ModelProviderRegistry({
+      provider: options.provider,
+      apiKey: options.apiKey,
+      baseUrl: options.baseUrl,
+      config: this.config,
       workspace: this.workspace
     });
     this.toolExecutor = new ToolExecutor({
@@ -217,39 +211,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
       emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
       recordAudit: (input) => this.recordAudit(input)
     });
-
-    if (!options.provider || options.provider === "openai-responses") {
-      this.registerProviderSync(
-        new OpenAIResponsesProvider({
-          apiKey: options.apiKey,
-          baseUrl: options.baseUrl
-        })
-      );
-    } else if (options.provider === "openai-chat-completions") {
-      this.registerProviderSync(
-        new OpenAIChatCompletionsProvider({
-          apiKey: options.apiKey,
-          baseUrl: options.baseUrl
-        })
-      );
-    } else if (options.provider === "anthropic-messages") {
-      this.registerProviderSync(
-        new AnthropicMessagesProvider({
-          apiKey: options.apiKey,
-          baseUrl: options.baseUrl
-        })
-      );
-    } else if (options.provider === "google-gemini") {
-      this.registerProviderSync(
-        new GoogleGeminiProvider({
-          apiKey: options.apiKey,
-          baseUrl: options.baseUrl
-        })
-      );
-    } else {
-      this.registerProviderSync(options.provider);
-    }
-
     for (const tool of createBuiltInCodingTools({ terminal: options.host?.terminal })) {
       this.tools.set(tool.name, tool);
     }
@@ -328,7 +289,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       }
       const diagnostics = await this.collectHostDiagnostics(runId, session.id);
 
-      const modelSelection = this.selectModelForRun(request);
+      const modelSelection = this.providerRegistry.select(request);
       this.emit("model.selection.resolved", "runtime", runId, session.id, modelSelection);
       const skillSelection = this.skillRuntime.selectForRun(text, modelSelection);
       for (const activation of skillSelection.activations) {
@@ -339,7 +300,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       }
       await this.mcpRuntime.discoverConfiguredServers();
 
-      const provider = this.getProvider(modelSelection.providerId);
+      const provider = this.providerRegistry.get(modelSelection.providerId);
       const modelResult = await this.runModel(
         provider,
         modelSelection,
@@ -987,7 +948,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async registerProvider(provider: ModelProvider): Promise<void> {
-    this.registerProviderSync(provider);
+    this.providerRegistry.register(provider);
   }
 
   async close(): Promise<void> {
@@ -1119,7 +1080,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       return remainingResult;
     }
 
-    const provider = this.getProvider(pending.modelSelection.providerId);
+    const provider = this.providerRegistry.get(pending.modelSelection.providerId);
     return this.continueModelLoop(
       provider,
       pending.modelSelection,
@@ -1352,44 +1313,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   private forwardProviderEvent(event: ModelProviderEvent, runId: string, sessionId: string): void {
     this.emit(event.type, "model", runId, sessionId, event);
-  }
-
-  private getActiveProvider(): ModelProvider {
-    const provider = this.providers.values().next().value as ModelProvider | undefined;
-    if (!provider) {
-      throw new ProviderError("No model provider is registered.", {
-        code: "provider.not_registered"
-      });
-    }
-    return provider;
-  }
-
-  private getProvider(providerId: string): ModelProvider {
-    const provider = this.providers.get(providerId);
-    if (!provider) {
-      throw new ProviderError(`Model provider is not registered: ${providerId}`, {
-        code: "provider.not_registered",
-        details: { providerId }
-      });
-    }
-    return provider;
-  }
-
-  private registerProviderSync(provider: ModelProvider): void {
-    this.providers.set(provider.id, provider);
-  }
-
-  private selectModelForRun(input: NormalizedSubmitInput): ModelSelectionResult {
-    return selectModel(this.config, {
-      explicitModel: input.model,
-      profile: input.profile,
-      taskType: input.taskType,
-      language: input.language,
-      text: input.text,
-      workspace: this.workspace,
-      defaultProviderId: this.getActiveProvider().id,
-      providerAliases: PROVIDER_ALIASES
-    });
   }
 
   private loadInitialApprovalPolicy(patch?: ApprovalPolicyPatch): ApprovalPolicyConfig {

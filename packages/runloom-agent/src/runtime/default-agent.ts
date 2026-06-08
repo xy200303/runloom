@@ -8,7 +8,7 @@ import { loadRunloomConfig, selectModel } from "../config/runloom-config.js";
 import { ApprovalError, ProviderError, RuntimeError, ToolError } from "../errors.js";
 import { RunloomEventBus } from "../events/event-bus.js";
 import { ExternalAgentRuntime } from "../external-agents/runtime.js";
-import { loadMcpServerConfigs } from "../mcp/mcp-config.js";
+import { ConfiguredMcpRuntime } from "../mcp/runtime.js";
 import { errorToLogDetails, emitLog } from "../observability/logger.js";
 import { AnthropicMessagesProvider } from "../providers/anthropic-messages-provider.js";
 import { GoogleGeminiProvider } from "../providers/google-gemini-provider.js";
@@ -53,10 +53,7 @@ import type {
   ListReviewFindingsOptions,
   ListRunsOptions,
   ListSkillProposalsOptions,
-  McpDiscoveryResult,
-  McpServerConfig,
   McpServerSummary,
-  McpToolDiscovery,
   ModelSelectionResult,
   ModelProvider,
   ModelProviderEvent,
@@ -154,13 +151,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly store: InMemorySessionStore;
   private readonly providers = new Map<string, ModelProvider>();
   private readonly tools = new Map<string, ToolDefinition>();
-  private readonly mcpServers = new Map<string, McpServerSummary>();
   private readonly skillRuntime: SkillRuntime;
+  private readonly mcpRuntime: ConfiguredMcpRuntime;
   private readonly a2aRuntime: A2APeerRuntime;
   private readonly externalAgentRuntime: ExternalAgentRuntime;
-  private readonly mcpServerConfigs = new Map<string, McpServerConfig>();
-  private readonly discoveredMcpServers = new Set<string>();
-  private readonly registeredMcpToolNames = new Set<string>();
   private readonly runs = new Map<string, StoredRun>();
   private readonly pendingModelContinuations = new Map<string, PendingModelContinuation>();
   private readonly runtimeStateStore?: FileRuntimeStateStore;
@@ -201,6 +195,13 @@ export class DefaultRunloomAgent implements RunloomAgent {
       getApprovalDecision: (approvalId) => this.store.getApprovalDecision(approvalId),
       resolveApproval: (approvalId, decision) => this.resolveApproval(approvalId, decision),
       getAvailableTools: () => [...this.tools.keys()],
+      emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
+      recordAudit: (input) => this.recordAudit(input)
+    });
+    this.mcpRuntime = new ConfiguredMcpRuntime({
+      stateDir: options.stateDir,
+      mcpClient: options.mcpClient,
+      tools: this.tools,
       emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
       recordAudit: (input) => this.recordAudit(input)
     });
@@ -257,7 +258,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       this.tools.set(tool.name, tool);
     }
     this.skillRuntime.loadConfigured();
-    this.loadConfiguredMcpServers();
+    this.mcpRuntime.loadConfigured();
   }
 
   async submit(input: string | RunloomInput, options: SubmitOptions = {}): Promise<RunResult> {
@@ -340,7 +341,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
       for (const diagnostic of skillSelection.diagnostics) {
         this.emit("skill.selection.diagnostic", "runtime", runId, session.id, diagnostic);
       }
-      await this.discoverConfiguredMcpServers();
+      await this.mcpRuntime.discoverConfiguredServers();
 
       const provider = this.getProvider(modelSelection.providerId);
       const modelResult = await this.runModel(
@@ -570,14 +571,11 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async listMcpServers(): Promise<McpServerSummary[]> {
-    await this.discoverConfiguredMcpServers();
-    return [...this.mcpServers.values()]
-      .map(cloneMcpServer)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.mcpRuntime.listServers();
   }
 
   async registerMcpServer(server: McpServerSummary): Promise<void> {
-    this.mcpServers.set(server.name, cloneMcpServer(server));
+    this.mcpRuntime.registerServer(server);
   }
 
   async listA2APeers(): Promise<A2APeerSummary[]> {
@@ -1007,164 +1005,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async close(): Promise<void> {
     // Reserved for future persistent stores, providers, MCP connections, and daemon transports.
-  }
-
-  private loadConfiguredMcpServers(): void {
-    const configs = loadMcpServerConfigs({ stateDir: this.options.stateDir });
-    for (const config of configs) {
-      this.mcpServerConfigs.set(config.name, cloneMcpServerConfig(config));
-      this.mcpServers.set(config.name, {
-        name: config.name,
-        enabled: config.enabled,
-        transport: config.transport,
-        status: config.enabled ? "disconnected" : "disconnected",
-        tools: [],
-        resources: 0,
-        prompts: 0,
-        permissions: cloneMcpPermissions(config.permissions)
-      });
-    }
-  }
-
-  private async discoverConfiguredMcpServers(): Promise<void> {
-    if (!this.options.mcpClient) {
-      return;
-    }
-
-    for (const config of this.mcpServerConfigs.values()) {
-      if (!config.enabled || this.discoveredMcpServers.has(config.name)) {
-        continue;
-      }
-
-      this.discoveredMcpServers.add(config.name);
-      this.updateMcpServer(config.name, {
-        status: "connecting",
-        error: undefined
-      });
-      this.emit("mcp.server.connecting", "mcp", "mcp", "global", {
-        serverName: config.name,
-        transport: config.transport
-      });
-
-      try {
-        const discovery = await this.options.mcpClient.discover(cloneMcpServerConfig(config));
-        this.applyMcpDiscovery(config, discovery);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.updateMcpServer(config.name, {
-          status: "error",
-          error: message
-        });
-        this.emit("mcp.error", "mcp", "mcp", "global", {
-          serverName: config.name,
-          error: message
-        });
-      }
-    }
-  }
-
-  private applyMcpDiscovery(config: McpServerConfig, discovery: McpDiscoveryResult): void {
-    const tools = discovery.tools?.map((tool) => tool.name).filter(Boolean) ?? [];
-    const registeredTools: string[] = [];
-    for (const tool of discovery.tools ?? []) {
-      if (this.shouldRegisterMcpTool(config, tool)) {
-        const toolName = this.registerMcpTool(config, tool);
-        registeredTools.push(toolName);
-      }
-    }
-
-    this.updateMcpServer(config.name, {
-      status: "connected",
-      tools,
-      resources: discovery.resources?.length ?? 0,
-      prompts: discovery.prompts?.length ?? 0,
-      error: undefined
-    });
-    this.emit("mcp.server.connected", "mcp", "mcp", "global", {
-      serverName: config.name,
-      transport: config.transport
-    });
-    this.emit("mcp.discovery.completed", "mcp", "mcp", "global", {
-      serverName: config.name,
-      tools,
-      registeredTools,
-      resources: discovery.resources?.length ?? 0,
-      prompts: discovery.prompts?.length ?? 0
-    });
-  }
-
-  private shouldRegisterMcpTool(config: McpServerConfig, tool: McpToolDiscovery): boolean {
-    if (config.permissions.tools === "deny") {
-      return false;
-    }
-    if (config.permissions.deniedToolNames?.includes(tool.name)) {
-      return false;
-    }
-    if (config.permissions.allowedToolNames?.length && !config.permissions.allowedToolNames.includes(tool.name)) {
-      return false;
-    }
-    return true;
-  }
-
-  private registerMcpTool(config: McpServerConfig, tool: McpToolDiscovery): string {
-    const toolName = `mcp.${config.name}.${sanitizeToolName(tool.name)}`;
-    if (this.registeredMcpToolNames.has(toolName)) {
-      return toolName;
-    }
-
-    this.registeredMcpToolNames.add(toolName);
-    this.tools.set(toolName, {
-      name: toolName,
-      description: tool.description ?? `MCP tool ${tool.name} from ${config.name}.`,
-      inputSchema: tool.inputSchema ?? {
-        type: "object",
-        additionalProperties: true
-      },
-      permissions: ["mcp.tools"],
-      execute: async (input, context) => {
-        if (!this.options.mcpClient?.callTool) {
-          throw new Error(`MCP client adapter does not support tool calls for ${config.name}.`);
-        }
-        this.emit("mcp.tool.call.requested", "mcp", context.runId, context.sessionId, {
-          serverName: config.name,
-          toolName: tool.name,
-          runloomToolName: toolName
-        });
-        const output = await this.options.mcpClient.callTool(cloneMcpServerConfig(config), tool.name, input, context);
-        this.emit("mcp.tool.call.completed", "mcp", context.runId, context.sessionId, {
-          serverName: config.name,
-          toolName: tool.name,
-          runloomToolName: toolName
-        });
-        this.recordAudit({
-          action: "mcp.tool.called",
-          actor: "runtime",
-          summary: `MCP tool called: ${config.name}/${tool.name}`,
-          runId: context.runId,
-          sessionId: context.sessionId,
-          details: {
-            serverName: config.name,
-            toolName: tool.name,
-            runloomToolName: toolName
-          }
-        });
-        return output;
-      }
-    });
-    this.emit("mcp.tool.registered", "mcp", "mcp", "global", {
-      serverName: config.name,
-      toolName: tool.name,
-      runloomToolName: toolName
-    });
-    return toolName;
-  }
-
-  private updateMcpServer(name: string, patch: Partial<McpServerSummary>): void {
-    const existing = this.mcpServers.get(name);
-    if (!existing) {
-      return;
-    }
-    this.mcpServers.set(name, cloneMcpServer({ ...existing, ...patch }));
   }
 
   private async listRunloomMcpServerTools(config: NormalizedMcpServerOptions): Promise<RunloomMcpServerTool[]> {
@@ -2109,30 +1949,6 @@ function clonePendingModelContinuation(pending: StoredPendingModelContinuation):
   };
 }
 
-function cloneMcpServer(server: McpServerSummary): McpServerSummary {
-  return {
-    ...server,
-    tools: server.tools ? [...server.tools] : undefined,
-    permissions: server.permissions ? cloneMcpPermissions(server.permissions) : undefined
-  };
-}
-
-function cloneMcpServerConfig(config: McpServerConfig): McpServerConfig {
-  return {
-    ...config,
-    args: config.args ? [...config.args] : undefined,
-    permissions: cloneMcpPermissions(config.permissions)
-  };
-}
-
-function cloneMcpPermissions(permissions: McpServerConfig["permissions"]): McpServerConfig["permissions"] {
-  return {
-    ...permissions,
-    allowedToolNames: permissions.allowedToolNames ? [...permissions.allowedToolNames] : undefined,
-    deniedToolNames: permissions.deniedToolNames ? [...permissions.deniedToolNames] : undefined
-  };
-}
-
 function normalizeMcpServerOptions(options: CreateRunloomMcpServerOptions): NormalizedMcpServerOptions {
   const readOnly = options.readOnly ?? true;
   return {
@@ -2320,10 +2136,6 @@ function toJsonText(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function sanitizeToolName(value: string): string {
-  return value.trim().replace(/[^a-z0-9._-]/gi, "_") || "tool";
 }
 
 function cloneModelInputItem(item: RunloomModelInputItem): RunloomModelInputItem {

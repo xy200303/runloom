@@ -17,11 +17,11 @@ import {
   panelForShortcut,
   parseActivityCategory,
   parsePanel,
-  parseScrollAmount,
-  parseVerificationCommand
+  parseScrollAmount
 } from "./command-parsers.js";
 import { TuiModelCommandController } from "./model-commands.js";
 import { TuiSessionCommandController } from "./session-commands.js";
+import { TuiToolCommandController } from "./tool-commands.js";
 import {
   DEFAULT_PANEL_LINES,
   FOCUS_PANELS,
@@ -46,8 +46,6 @@ import {
   formatApprovalRequest,
   formatApprovalResolution,
   formatCompositeView,
-  formatDiffActivity,
-  formatDiffSummary,
   formatErrorPayload,
   formatExternalAgents,
   formatFocusCommandHelp,
@@ -64,11 +62,8 @@ import {
   formatTodo,
   formatTodoView,
   formatToolActivityEvent,
-  formatToolExecutionState,
   formatTools,
   formatTranscriptView,
-  formatVerificationActivity,
-  formatVerificationResult,
   formatWaitingApproval
 } from "./view-formatters.js";
 
@@ -99,6 +94,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private readonly approvalCommands: TuiApprovalCommandController;
   private readonly modelCommands: TuiModelCommandController;
   private readonly sessionCommands: TuiSessionCommandController;
+  private readonly toolCommands: TuiToolCommandController;
   private readonly viewState: TuiViewState = {
     transcript: [],
     activity: [],
@@ -132,6 +128,13 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       },
       rebuildFromStoredEvents: (sessionId) => this.rebuildFromStoredEvents(sessionId),
       renderCompositeView: () => formatCompositeView(this.viewState, this.viewContext())
+    });
+    this.toolCommands = new TuiToolCommandController({
+      agent: options.agent,
+      output: options.output ?? defaultOutput,
+      getActiveSessionId: () => this.activeSessionId,
+      trackToolSession: (result) => this.trackToolSession(result),
+      recordToolCommandActivity: (result, line, category) => this.recordToolCommandActivity(result, line, category)
     });
   }
 
@@ -404,7 +407,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/diff") {
-      await this.handleDiffCommand();
+      await this.toolCommands.handleDiffCommand();
       return;
     }
 
@@ -449,12 +452,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/git") {
-      await this.handleGitCommand();
+      await this.toolCommands.handleGitCommand();
       return;
     }
 
     if (command === "/tests" || command.startsWith("/tests ")) {
-      await this.handleTestsCommand(command);
+      await this.toolCommands.handleTestsCommand(command);
       return;
     }
 
@@ -469,46 +472,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     output.write(`Unknown command: ${command}\n`);
-  }
-
-  private async handleGitCommand(): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const result = await this.options.agent.executeTool("git.status", {}, { sessionId: this.activeSessionId });
-    this.trackToolSession(result);
-    if (result.status !== "completed") {
-      this.recordToolCommandActivity(result, formatToolExecutionState(result).trim(), "tools");
-      output.write(formatToolExecutionState(result));
-      return;
-    }
-    this.recordToolCommandActivity(result, `git ${formatGitStatus(result.output)}`, "coding");
-    output.write(`[git] ${formatGitStatus(result.output)}\n`);
-  }
-
-  private async handleTestsCommand(command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const verification = parseVerificationCommand(command);
-    const result = await this.options.agent.executeTool("shell.verify", verification, { sessionId: this.activeSessionId });
-    this.trackToolSession(result);
-    if (result.status !== "completed") {
-      this.recordToolCommandActivity(result, formatToolExecutionState(result).trim(), "tools");
-      output.write(formatToolExecutionState(result));
-      return;
-    }
-    this.recordToolCommandActivity(result, `tests ${formatVerificationActivity(result.output)}`, "coding");
-    output.write(formatVerificationResult(result.output));
-  }
-
-  private async handleDiffCommand(): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const result = await this.options.agent.executeTool("git.diff", {}, { sessionId: this.activeSessionId });
-    this.trackToolSession(result);
-    if (result.status !== "completed") {
-      this.recordToolCommandActivity(result, formatToolExecutionState(result).trim(), "tools");
-      output.write(formatToolExecutionState(result));
-      return;
-    }
-    this.recordToolCommandActivity(result, `diff ${formatDiffActivity(result.output)}`, "coding");
-    output.write(formatDiffSummary(result.output));
   }
 
   private async handleStopCommand(): Promise<void> {

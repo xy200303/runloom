@@ -21,6 +21,7 @@ import {
   parseVerificationCommand
 } from "./command-parsers.js";
 import { TuiModelCommandController } from "./model-commands.js";
+import { TuiSessionCommandController } from "./session-commands.js";
 import {
   DEFAULT_PANEL_LINES,
   FOCUS_PANELS,
@@ -45,7 +46,6 @@ import {
   formatApprovalRequest,
   formatApprovalResolution,
   formatCompositeView,
-  formatCurrentSession,
   formatDiffActivity,
   formatDiffSummary,
   formatErrorPayload,
@@ -56,8 +56,6 @@ import {
   formatModelSelection,
   formatReviewFindings,
   formatScrollCommandHelp,
-  formatSessionCommandHelp,
-  formatSessions,
   formatShortcutCommandHelp,
   formatShortcutLabel,
   formatSkillActivation,
@@ -100,6 +98,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private assistantBuffer = "";
   private readonly approvalCommands: TuiApprovalCommandController;
   private readonly modelCommands: TuiModelCommandController;
+  private readonly sessionCommands: TuiSessionCommandController;
   private readonly viewState: TuiViewState = {
     transcript: [],
     activity: [],
@@ -119,6 +118,20 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     });
     this.modelCommands = new TuiModelCommandController({
       output: options.output ?? defaultOutput
+    });
+    this.sessionCommands = new TuiSessionCommandController({
+      agent: options.agent,
+      output: options.output ?? defaultOutput,
+      getActiveSessionId: () => this.activeSessionId,
+      getActiveRunId: () => this.activeRunId,
+      setActiveSessionId: (sessionId) => {
+        this.activeSessionId = sessionId;
+      },
+      setActiveRunId: (runId) => {
+        this.activeRunId = runId;
+      },
+      rebuildFromStoredEvents: (sessionId) => this.rebuildFromStoredEvents(sessionId),
+      renderCompositeView: () => formatCompositeView(this.viewState, this.viewContext())
     });
   }
 
@@ -360,7 +373,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/replay") {
-      await this.handleReplayCommand();
+      await this.sessionCommands.handleReplayCommand();
       return;
     }
 
@@ -381,7 +394,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/session" || command.startsWith("/session ")) {
-      await this.handleSessionCommand(command);
+      await this.sessionCommands.handleSessionCommand(command);
       return;
     }
 
@@ -498,45 +511,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     output.write(formatDiffSummary(result.output));
   }
 
-  private async handleSessionCommand(command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const [, action, sessionId] = command.split(/\s+/);
-
-    if (!action) {
-      if (!this.activeSessionId) {
-        output.write("Session: (none yet)\n");
-        return;
-      }
-      const session = await this.options.agent.getSession(this.activeSessionId);
-      output.write(formatCurrentSession(session, this.activeRunId));
-      return;
-    }
-
-    if (action === "list") {
-      const sessions = await this.options.agent.listSessions();
-      output.write(formatSessions(sessions, this.activeSessionId));
-      return;
-    }
-
-    if (action === "switch") {
-      if (!sessionId) {
-        output.write("Missing session id for /session switch\n");
-        return;
-      }
-      const session = await this.options.agent.getSession(sessionId);
-      this.activeSessionId = session.id;
-      this.activeRunId = undefined;
-      const events = await this.rebuildFromStoredEvents(session.id);
-      output.write(`Session switched to ${session.id}\n`);
-      output.write(`[replay] loaded ${events.length} event(s)\n`);
-      output.write(formatCompositeView(this.viewState, this.viewContext()));
-      return;
-    }
-
-    output.write(`Unknown /session action: ${action}\n`);
-    output.write(formatSessionCommandHelp());
-  }
-
   private async handleStopCommand(): Promise<void> {
     const output = this.options.output ?? defaultOutput;
     if (!this.activeRunId) {
@@ -565,13 +539,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       const message = error instanceof Error ? error.message : String(error);
       output.write(`Resume failed: ${message}\n`);
     }
-  }
-
-  private async handleReplayCommand(): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const events = await this.rebuildFromStoredEvents(this.activeSessionId);
-    output.write(`[replay] loaded ${events.length} event(s)\n`);
-    output.write(formatCompositeView(this.viewState, this.viewContext()));
   }
 
   private async handlePanelCommand(panel: TuiPanel, command: string): Promise<void> {

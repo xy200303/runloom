@@ -10,60 +10,40 @@ import type {
   Unsubscribe
 } from "runloom-agent";
 import { TuiApprovalCommandController } from "./approval-commands.js";
-import {
-  isApprovalShortcut,
-  isScrollAction,
-  normalizeShortcut,
-  panelForShortcut,
-  parseActivityCategory,
-  parsePanel,
-  parseScrollAmount
-} from "./command-parsers.js";
 import { TuiModelCommandController } from "./model-commands.js";
 import { TuiSessionCommandController } from "./session-commands.js";
 import { TuiToolCommandController } from "./tool-commands.js";
 import {
-  DEFAULT_PANEL_LINES,
-  FOCUS_PANELS,
+  TuiViewCommandController,
+  type ClearTuiViewStateOptions
+} from "./view-commands.js";
+import {
   MAX_VIEW_LINES,
-  clamp,
   pushCapped,
   truncateText,
-  visibleSlice,
   type ActivityCategory,
-  type ScrollAction,
   type TuiActivityRecord,
-  type TuiPanel,
   type TuiViewContext,
   type TuiViewState
 } from "./view-model.js";
 import {
   formatA2APeers,
-  formatActivityCommandHelp,
-  formatActivityDetail,
-  formatActivityView,
   formatApprovalPolicy,
   formatApprovalRequest,
   formatApprovalResolution,
   formatCompositeView,
   formatErrorPayload,
   formatExternalAgents,
-  formatFocusCommandHelp,
   formatGitStatus,
   formatMcpServers,
   formatModelSelection,
   formatReviewFindings,
-  formatScrollCommandHelp,
-  formatShortcutCommandHelp,
-  formatShortcutLabel,
   formatSkillActivation,
   formatSkills,
   formatStatusView,
   formatTodo,
-  formatTodoView,
   formatToolActivityEvent,
   formatTools,
-  formatTranscriptView,
   formatWaitingApproval
 } from "./view-formatters.js";
 
@@ -95,6 +75,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   private readonly modelCommands: TuiModelCommandController;
   private readonly sessionCommands: TuiSessionCommandController;
   private readonly toolCommands: TuiToolCommandController;
+  private readonly viewCommands: TuiViewCommandController;
   private readonly viewState: TuiViewState = {
     transcript: [],
     activity: [],
@@ -114,6 +95,13 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     });
     this.modelCommands = new TuiModelCommandController({
       output: options.output ?? defaultOutput
+    });
+    this.viewCommands = new TuiViewCommandController({
+      output: options.output ?? defaultOutput,
+      viewState: this.viewState,
+      approvalCommands: this.approvalCommands,
+      clearViewState: (clearOptions) => this.clearViewState(clearOptions),
+      getViewContext: () => this.viewContext()
     });
     this.sessionCommands = new TuiSessionCommandController({
       agent: options.agent,
@@ -340,22 +328,22 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/transcript" || command.startsWith("/transcript ")) {
-      await this.handlePanelCommand("transcript", command);
+      this.viewCommands.handlePanelCommand("transcript", command);
       return;
     }
 
     if (command === "/activity" || command.startsWith("/activity ")) {
-      this.handleActivityCommand(command);
+      this.viewCommands.handleActivityCommand(command);
       return;
     }
 
     if (command === "/focus" || command.startsWith("/focus ")) {
-      this.handleFocusCommand(command);
+      this.viewCommands.handleFocusCommand(command);
       return;
     }
 
     if (command === "/scroll" || command.startsWith("/scroll ")) {
-      this.handleScrollCommand(command);
+      this.viewCommands.handleScrollCommand(command);
       return;
     }
 
@@ -371,7 +359,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/key" || command.startsWith("/key ")) {
-      await this.handleShortcutCommand(command);
+      await this.viewCommands.handleShortcutCommand(command);
       return;
     }
 
@@ -402,7 +390,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/todo" || command.startsWith("/todo ")) {
-      await this.handlePanelCommand("todo", command);
+      this.viewCommands.handlePanelCommand("todo", command);
       return;
     }
 
@@ -502,342 +490,6 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       const message = error instanceof Error ? error.message : String(error);
       output.write(`Resume failed: ${message}\n`);
     }
-  }
-
-  private async handlePanelCommand(panel: TuiPanel, command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const [, action, amountText] = command.split(/\s+/);
-    if (action && isScrollAction(action)) {
-      this.viewState.focus = panel;
-      this.scrollPanel(panel, action, parseScrollAmount(amountText));
-    }
-    output.write(this.formatPanel(panel));
-  }
-
-  private handleActivityCommand(command: string): void {
-    const output = this.options.output ?? defaultOutput;
-    const [, first, second, third] = command.split(/\s+/);
-    let category: ActivityCategory | undefined;
-    let actionText = first;
-    let amountText = second;
-
-    const firstToken = first?.toLowerCase();
-    if (firstToken === "view") {
-      output.write(this.formatActivityDetailCommand(second, third));
-      return;
-    }
-
-    if (firstToken && isScrollAction(firstToken)) {
-      actionText = firstToken;
-    } else if (firstToken) {
-      if (firstToken === "all") {
-        actionText = second?.toLowerCase();
-        amountText = third;
-      } else {
-        category = parseActivityCategory(firstToken);
-        if (!category) {
-          output.write(`Invalid activity filter: ${first}\n`);
-          output.write(formatActivityCommandHelp());
-          return;
-        }
-        actionText = second?.toLowerCase();
-        amountText = third;
-      }
-    }
-
-    if (actionText === "view") {
-      output.write(this.formatActivityDetailCommand(category, amountText));
-      return;
-    }
-
-    if (actionText && isScrollAction(actionText)) {
-      this.viewState.focus = "activity";
-      this.scrollActivity(category, actionText, parseScrollAmount(amountText));
-    } else if (actionText) {
-      output.write(`Invalid activity action: ${actionText}\n`);
-      output.write(formatActivityCommandHelp());
-      return;
-    }
-
-    output.write(this.formatActivity(category));
-  }
-
-  private handleFocusCommand(command: string): void {
-    const output = this.options.output ?? defaultOutput;
-    const [, panelText] = command.split(/\s+/);
-    if (!panelText) {
-      output.write(`Focus: ${this.viewState.focus}\n`);
-      output.write(formatFocusCommandHelp());
-      return;
-    }
-
-    const panel = parsePanel(panelText);
-    if (!panel) {
-      output.write(`Invalid panel: ${panelText}\n`);
-      output.write(formatFocusCommandHelp());
-      return;
-    }
-
-    this.viewState.focus = panel;
-    output.write(`Focus set to ${panel}\n`);
-    output.write(this.formatPanel(panel));
-  }
-
-  private handleScrollCommand(command: string): void {
-    const output = this.options.output ?? defaultOutput;
-    const [, actionText, amountText] = command.split(/\s+/);
-    const action = actionText ?? "down";
-    if (!isScrollAction(action)) {
-      output.write(`Invalid scroll direction: ${action}\n`);
-      output.write(formatScrollCommandHelp());
-      return;
-    }
-
-    this.scrollPanel(this.viewState.focus, action, parseScrollAmount(amountText));
-    output.write(this.formatPanel(this.viewState.focus));
-  }
-
-  private async handleShortcutCommand(command: string): Promise<void> {
-    const output = this.options.output ?? defaultOutput;
-    const [, shortcutText, ...shortcutArgs] = command.split(/\s+/);
-    const shortcut = normalizeShortcut(shortcutText ?? "");
-
-    if (!shortcut) {
-      output.write("Invalid keyboard shortcut\n");
-      output.write(formatShortcutCommandHelp());
-      return;
-    }
-
-    if (shortcut === "ctrl+l") {
-      this.clearViewState({ preserveActiveRun: true, preserveLatestModel: true });
-      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      output.write("View cleared\n");
-      return;
-    }
-
-    if (shortcut === "esc") {
-      this.approvalCommands.clearFocus();
-      this.viewState.focus = "transcript";
-      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      output.write("Focus set to transcript\n");
-      output.write(this.formatPanel("transcript"));
-      return;
-    }
-
-    if (shortcut === "enter") {
-      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      output.write(this.formatFocusedDefaultAction());
-      return;
-    }
-
-    if (shortcut === "pgup" || shortcut === "pgdn") {
-      const panel = this.viewState.focus;
-      this.scrollPanel(panel, shortcut === "pgup" ? "up" : "down", DEFAULT_PANEL_LINES);
-      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      output.write(this.formatPanel(panel));
-      return;
-    }
-
-    if (shortcut === "home" || shortcut === "end") {
-      const panel = this.viewState.focus;
-      this.scrollPanel(panel, shortcut === "home" ? "top" : "bottom", DEFAULT_PANEL_LINES);
-      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      output.write(this.formatPanel(panel));
-      return;
-    }
-
-    if (shortcut === "tab" || shortcut === "shift+tab") {
-      const panel = this.cycleFocus(shortcut === "tab" ? 1 : -1);
-      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      output.write(`Focus set to ${panel}\n`);
-      output.write(this.formatPanel(panel));
-      return;
-    }
-
-    if (isApprovalShortcut(shortcut)) {
-      output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-      await this.approvalCommands.handleShortcut(shortcut, shortcutArgs);
-      return;
-    }
-
-    const panel = panelForShortcut(shortcut);
-    if (!panel) {
-      output.write("Invalid keyboard shortcut\n");
-      output.write(formatShortcutCommandHelp());
-      return;
-    }
-    this.viewState.focus = panel;
-    output.write(`Shortcut ${formatShortcutLabel(shortcut)}\n`);
-    output.write(`Focus set to ${panel}\n`);
-    output.write(this.formatPanel(panel));
-  }
-
-  private cycleFocus(direction: 1 | -1): TuiPanel {
-    const currentIndex = FOCUS_PANELS.indexOf(this.viewState.focus);
-    const nextIndex = currentIndex === -1
-      ? 0
-      : (currentIndex + direction + FOCUS_PANELS.length) % FOCUS_PANELS.length;
-    const panel = FOCUS_PANELS[nextIndex] ?? "transcript";
-    this.viewState.focus = panel;
-    return panel;
-  }
-
-  private formatFocusedDefaultAction(): string {
-    if (this.viewState.focus === "activity") {
-      return this.formatActivityDetailCommand("current");
-    }
-    return this.formatPanel(this.viewState.focus);
-  }
-
-  private scrollPanel(panel: TuiPanel, action: ScrollAction, amount: number): void {
-    const maxOffset = this.maxScrollOffset(panel);
-    const current = this.getScrollOffset(panel);
-    let next: number;
-
-    if (action === "up") {
-      next = current + amount;
-    } else if (action === "down") {
-      next = current - amount;
-    } else if (action === "top") {
-      next = maxOffset;
-    } else {
-      next = 0;
-    }
-
-    this.setScrollOffset(panel, clamp(next, 0, maxOffset));
-  }
-
-  private scrollActivity(category: ActivityCategory | undefined, action: ScrollAction, amount: number): void {
-    const maxOffset = Math.max(0, this.activityLines(category).length - DEFAULT_PANEL_LINES);
-    const current = this.viewState.activityScrollOffset;
-    let next: number;
-
-    if (action === "up") {
-      next = current + amount;
-    } else if (action === "down") {
-      next = current - amount;
-    } else if (action === "top") {
-      next = maxOffset;
-    } else {
-      next = 0;
-    }
-
-    this.viewState.activityScrollOffset = clamp(next, 0, maxOffset);
-  }
-
-  private maxScrollOffset(panel: TuiPanel): number {
-    if (panel === "transcript") {
-      return Math.max(0, this.viewState.transcript.length - DEFAULT_PANEL_LINES);
-    }
-    if (panel === "activity") {
-      return Math.max(0, this.viewState.activity.length - DEFAULT_PANEL_LINES);
-    }
-    if (panel === "todo") {
-      return Math.max(0, this.viewState.todoItems.length - DEFAULT_PANEL_LINES);
-    }
-    return 0;
-  }
-
-  private getScrollOffset(panel: TuiPanel): number {
-    if (panel === "transcript") {
-      return this.viewState.transcriptScrollOffset;
-    }
-    if (panel === "activity") {
-      return this.viewState.activityScrollOffset;
-    }
-    if (panel === "todo") {
-      return this.viewState.todoScrollOffset;
-    }
-    return 0;
-  }
-
-  private setScrollOffset(panel: TuiPanel, offset: number): void {
-    if (panel === "transcript") {
-      this.viewState.transcriptScrollOffset = offset;
-    } else if (panel === "activity") {
-      this.viewState.activityScrollOffset = offset;
-    } else if (panel === "todo") {
-      this.viewState.todoScrollOffset = offset;
-    }
-  }
-
-  private resetScrollOffsets(): void {
-    this.viewState.transcriptScrollOffset = 0;
-    this.viewState.activityScrollOffset = 0;
-    this.viewState.todoScrollOffset = 0;
-  }
-
-  private formatPanel(panel: TuiPanel): string {
-    if (panel === "status") {
-      return formatStatusView(this.viewState, this.viewContext());
-    }
-    if (panel === "todo") {
-      return formatTodoView(this.viewState.todoItems, DEFAULT_PANEL_LINES, this.viewState.todoScrollOffset);
-    }
-    if (panel === "activity") {
-      return this.formatActivity();
-    }
-    return formatTranscriptView(this.viewState.transcript, DEFAULT_PANEL_LINES, this.viewState.transcriptScrollOffset);
-  }
-
-  private formatActivity(category?: ActivityCategory): string {
-    const lines = this.activityLines(category);
-    const scrollOffset = clamp(this.viewState.activityScrollOffset, 0, Math.max(0, lines.length - DEFAULT_PANEL_LINES));
-    return formatActivityView(
-      lines,
-      DEFAULT_PANEL_LINES,
-      scrollOffset,
-      category
-    );
-  }
-
-  private activityLines(category?: ActivityCategory): string[] {
-    return this.activityRecords(category).map((record) => record.line);
-  }
-
-  private activityRecords(category?: ActivityCategory): TuiActivityRecord[] {
-    if (!category) {
-      return this.viewState.activityRecords;
-    }
-    return this.viewState.activityRecords.filter((record) => record.category === category);
-  }
-
-  private formatActivityDetailCommand(categoryOrTarget?: ActivityCategory | string, targetText?: string): string {
-    let category: ActivityCategory | undefined;
-    let target = targetText;
-
-    if (typeof categoryOrTarget === "string") {
-      const token = categoryOrTarget.toLowerCase();
-      if (token === "all") {
-        target = targetText;
-      } else {
-        const parsedCategory = parseActivityCategory(token);
-        if (parsedCategory) {
-          category = parsedCategory;
-          target = targetText;
-        } else {
-          target = categoryOrTarget;
-        }
-      }
-    } else {
-      category = categoryOrTarget;
-    }
-
-    return formatActivityDetail(
-      this.activityRecords(category),
-      this.viewState.activityRecords,
-      category,
-      target,
-      this.currentActivityVisibleIndex(category)
-    );
-  }
-
-  private currentActivityVisibleIndex(category?: ActivityCategory): number | undefined {
-    const records = this.activityRecords(category);
-    if (records.length === 0) {
-      return undefined;
-    }
-    return visibleSlice(records, DEFAULT_PANEL_LINES, this.viewState.activityScrollOffset).start;
   }
 
   private viewContext(): TuiViewContext {
@@ -974,7 +626,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     this.flushAssistantTranscript();
   }
 
-  private clearViewState(options: { preserveActiveRun?: boolean; preserveLatestModel?: boolean } = {}): void {
+  private clearViewState(options: ClearTuiViewStateOptions = {}): void {
     const activeRunId = this.activeRunId;
     const runStatus = this.viewState.runStatus;
     const latestModel = this.viewState.latestModel;
@@ -984,7 +636,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     this.viewState.todoItems = [];
     this.viewState.runStatus = options.preserveActiveRun ? runStatus : "idle";
     this.viewState.focus = "transcript";
-    this.resetScrollOffsets();
+    this.viewCommands.resetScrollOffsets();
     this.viewState.latestModel = options.preserveLatestModel ? latestModel : undefined;
     this.activeRunId = options.preserveActiveRun ? activeRunId : undefined;
     this.assistantBuffer = "";

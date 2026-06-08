@@ -17,9 +17,7 @@ import { OpenAIResponsesProvider } from "../providers/openai-responses-provider.
 import { redactText, redactValue } from "../security/redaction.js";
 import { FileRuntimeStateStore } from "../sessions/file-runtime-state-store.js";
 import { InMemorySessionStore } from "../sessions/in-memory-store.js";
-import { loadSkills, validateSkillDefinition } from "../skills/skill-manifest.js";
-import { SkillProposalStore, cloneSkillProposal, createSkillProposal } from "../skills/skill-proposals.js";
-import { selectSkillActivations } from "../skills/skill-selector.js";
+import { SkillRuntime } from "../skills/runtime.js";
 import { createBuiltInCodingTools } from "../tools/coding-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import type {
@@ -87,7 +85,6 @@ import type {
   RunloomMcpToolCallResult,
   RunloomReviewFindings,
   RunloomRun,
-  RunloomSkillActivation,
   RunloomSkillProposal,
   RunloomSession,
   RunloomSkillSummary,
@@ -157,8 +154,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly store: InMemorySessionStore;
   private readonly providers = new Map<string, ModelProvider>();
   private readonly tools = new Map<string, ToolDefinition>();
-  private readonly skills = new Map<string, RunloomSkillSummary>();
   private readonly mcpServers = new Map<string, McpServerSummary>();
+  private readonly skillRuntime: SkillRuntime;
   private readonly a2aRuntime: A2APeerRuntime;
   private readonly externalAgentRuntime: ExternalAgentRuntime;
   private readonly mcpServerConfigs = new Map<string, McpServerConfig>();
@@ -173,13 +170,10 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly activeRuns = new Map<string, { sessionId: string; controller: AbortController }>();
   private approvalPolicy: ApprovalPolicyConfig;
   private sequence = 0;
-  private readonly skillProposals = new Map<string, RunloomSkillProposal>();
-  private readonly skillProposalStore?: SkillProposalStore;
 
   constructor(private readonly options: CreateRunloomAgentOptions) {
     this.workspace = resolve(options.host?.workspace?.root ?? options.workspace);
     this.runtimeStateStore = options.stateDir ? new FileRuntimeStateStore(options.stateDir, this.workspace) : undefined;
-    this.skillProposalStore = options.stateDir ? new SkillProposalStore(options.stateDir) : undefined;
     const runtimeSnapshot = this.runtimeStateStore?.load();
     this.sequence = runtimeSnapshot?.sequence ?? 0;
     this.store = new InMemorySessionStore(runtimeSnapshot?.store, () => this.saveRuntimeState());
@@ -197,6 +191,18 @@ export class DefaultRunloomAgent implements RunloomAgent {
       saveApproval: (request) => this.store.saveApproval(request),
       emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
       logger: options.logger
+    });
+    this.skillRuntime = new SkillRuntime({
+      stateDir: options.stateDir,
+      getApprovalPolicy: () => this.approvalPolicy,
+      createSession: (sessionId) => sessionId ? this.getSession(sessionId) : Promise.resolve(this.store.createSession(this.workspace)),
+      saveApproval: (request) => this.store.saveApproval(request),
+      getApproval: (approvalId) => this.store.getApproval(approvalId),
+      getApprovalDecision: (approvalId) => this.store.getApprovalDecision(approvalId),
+      resolveApproval: (approvalId, decision) => this.resolveApproval(approvalId, decision),
+      getAvailableTools: () => [...this.tools.keys()],
+      emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
+      recordAudit: (input) => this.recordAudit(input)
     });
     this.a2aRuntime = new A2APeerRuntime({
       workspace: this.workspace,
@@ -250,8 +256,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
     for (const tool of createBuiltInCodingTools({ terminal: options.host?.terminal })) {
       this.tools.set(tool.name, tool);
     }
-    this.loadSkillProposals();
-    this.loadConfiguredSkills();
+    this.skillRuntime.loadConfigured();
     this.loadConfiguredMcpServers();
   }
 
@@ -328,7 +333,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
       const modelSelection = this.selectModelForRun(request);
       this.emit("model.selection.resolved", "runtime", runId, session.id, modelSelection);
-      const skillSelection = this.selectSkillsForRun(text, modelSelection);
+      const skillSelection = this.skillRuntime.selectForRun(text, modelSelection);
       for (const activation of skillSelection.activations) {
         this.emit("skill.activated", "runtime", runId, session.id, activation);
       }
@@ -345,7 +350,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         session.id,
         text,
         `${buildWorkspaceContext(inspection)}${buildDiagnosticsContext(diagnostics)}`,
-        this.buildSkillContext(skillSelection.activations),
+        this.skillRuntime.buildContext(skillSelection.activations),
         controller.signal
       );
 
@@ -542,102 +547,26 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async listSkills(): Promise<RunloomSkillSummary[]> {
-    return [...this.skills.values()]
-      .map(cloneSkill)
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return this.skillRuntime.listSkills();
   }
 
   async registerSkill(skill: RunloomSkillSummary): Promise<void> {
-    this.skills.set(skill.name, cloneSkill(skill));
+    this.skillRuntime.registerSkill(skill);
   }
 
   async proposeSkill(
     input: CreateRunloomSkillProposalInput,
     options: CreateRunloomSkillProposalOptions = {}
   ): Promise<RunloomSkillProposal> {
-    const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
-    const runId = options.runId ?? `skill_${randomUUID()}`;
-    const created = createSkillProposal(
-      input,
-      {
-        runId,
-        sessionId: session.id
-      },
-      this.approvalPolicy
-    );
-    this.saveSkillProposal(created.proposal);
-    this.emit("skill.proposal.created", "runtime", runId, session.id, created.proposal);
-    this.recordAudit({
-      action: "skill.proposal.created",
-      actor: "runtime",
-      runId,
-      sessionId: session.id,
-      summary: `Skill proposal created: ${created.proposal.skillName}.`,
-      details: {
-        proposalId: created.proposal.id,
-        skillName: created.proposal.skillName,
-        changeType: created.proposal.changeType,
-        status: created.proposal.status,
-        validation: created.proposal.validation,
-        risk: created.proposal.risk
-      }
-    });
-
-    if (!created.proposal.validation.valid) {
-      this.emit("skill.proposal.validation_failed", "runtime", runId, session.id, created.proposal);
-      return cloneSkillProposal(created.proposal);
-    }
-
-    if (created.approval) {
-      this.store.saveApproval(created.approval);
-      this.emit("approval.requested", "approval", runId, session.id, created.approval);
-      this.emit("skill.proposal.approval_requested", "runtime", runId, session.id, created.proposal);
-      return cloneSkillProposal(created.proposal);
-    }
-
-    return this.installApprovedSkillProposal(created.proposal.id, "policy");
+    return this.skillRuntime.proposeSkill(input, options);
   }
 
   async listSkillProposals(options: ListSkillProposalsOptions = {}): Promise<RunloomSkillProposal[]> {
-    const proposals = [...this.skillProposals.values()]
-      .filter((proposal) => !options.status || proposal.status === options.status)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return takeLast(proposals, options.limit).map(cloneSkillProposal);
+    return this.skillRuntime.listSkillProposals(options);
   }
 
   async approveSkillProposal(proposalId: string, decision: ApprovalDecision = { decision: "approved" }): Promise<RunloomSkillProposal> {
-    const proposal = this.skillProposals.get(proposalId);
-    if (!proposal) {
-      throw new RuntimeError(`Skill proposal not found: ${proposalId}`, {
-        code: "runtime.skill_proposal_not_found",
-        details: { proposalId }
-      });
-    }
-    if (proposal.status === "installed" || proposal.status === "denied" || proposal.status === "invalid") {
-      return cloneSkillProposal(proposal);
-    }
-    if (!proposal.approvalId) {
-      return this.installApprovedSkillProposal(proposalId, "policy");
-    }
-    const pendingApproval = this.store.getApproval(proposal.approvalId);
-    if (pendingApproval) {
-      await this.resolveApproval(proposal.approvalId, decision);
-      const updated = this.skillProposals.get(proposalId);
-      return cloneSkillProposal(updated ?? proposal);
-    }
-    const resolvedDecision = this.store.getApprovalDecision(proposal.approvalId);
-    if (!resolvedDecision) {
-      throw new ApprovalError(`Skill proposal approval has not been resolved: ${proposal.approvalId}`, {
-        code: "approval.not_resolved",
-        details: {
-          approvalId: proposal.approvalId,
-          proposalId
-        }
-      });
-    }
-    await this.applySkillProposalApproval(proposal.approvalId, resolvedDecision);
-    const updated = this.skillProposals.get(proposalId);
-    return cloneSkillProposal(updated ?? proposal);
+    return this.skillRuntime.approveSkillProposal(proposalId, decision);
   }
 
   async listMcpServers(): Promise<McpServerSummary[]> {
@@ -1025,7 +954,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
         decision
       }
     });
-    await this.applySkillProposalApproval(approvalId, decision);
+    await this.skillRuntime.applyApproval(approvalId, decision);
   }
 
   async getApprovalPolicy(): Promise<ApprovalPolicyConfig> {
@@ -1078,179 +1007,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
 
   async close(): Promise<void> {
     // Reserved for future persistent stores, providers, MCP connections, and daemon transports.
-  }
-
-  private loadSkillProposals(): void {
-    const proposals = this.skillProposalStore?.list() ?? [];
-    for (const proposal of proposals) {
-      this.skillProposals.set(proposal.id, cloneSkillProposal(proposal));
-    }
-    if (proposals.length > 0) {
-      this.emit("skill.proposals.loaded", "runtime", "skills", "global", {
-        count: proposals.length,
-        waitingApproval: proposals.filter((proposal) => proposal.status === "waiting_approval").length,
-        installed: proposals.filter((proposal) => proposal.status === "installed").length,
-        invalid: proposals.filter((proposal) => proposal.status === "invalid").length
-      });
-    }
-  }
-
-  private saveSkillProposal(proposal: RunloomSkillProposal): void {
-    const cloned = cloneSkillProposal(proposal);
-    this.skillProposals.set(cloned.id, cloned);
-    this.skillProposalStore?.save(cloned);
-  }
-
-  private async applySkillProposalApproval(approvalId: string, decision: ApprovalDecision): Promise<void> {
-    const proposal = [...this.skillProposals.values()].find((item) => item.approvalId === approvalId);
-    if (!proposal) {
-      return;
-    }
-
-    if (decision.decision === "denied") {
-      const now = new Date().toISOString();
-      const denied: RunloomSkillProposal = {
-        ...proposal,
-        status: "denied",
-        deniedAt: now,
-        updatedAt: now,
-        diagnostics: decision.reason ? [decision.reason] : proposal.diagnostics
-      };
-      this.saveSkillProposal(denied);
-      this.emit("skill.proposal.denied", "runtime", denied.runId, denied.sessionId, denied);
-      this.recordAudit({
-        action: "skill.proposal.denied",
-        actor: "user",
-        runId: denied.runId,
-        sessionId: denied.sessionId,
-        summary: `Skill proposal denied: ${denied.skillName}.`,
-        details: {
-          proposalId: denied.id,
-          skillName: denied.skillName,
-          reason: decision.reason
-        }
-      });
-      return;
-    }
-
-    await this.installApprovedSkillProposal(proposal.id, "approval");
-  }
-
-  private async installApprovedSkillProposal(proposalId: string, actor: "approval" | "policy"): Promise<RunloomSkillProposal> {
-    const proposal = this.skillProposals.get(proposalId);
-    if (!proposal) {
-      throw new RuntimeError(`Skill proposal not found: ${proposalId}`, {
-        code: "runtime.skill_proposal_not_found",
-        details: { proposalId }
-      });
-    }
-    if (!proposal.validation.valid || !proposal.manifest || proposal.instructions === undefined) {
-      throw new RuntimeError(`Skill proposal is not valid for installation: ${proposalId}`, {
-        code: "runtime.skill_proposal_invalid",
-        details: {
-          proposalId,
-          validation: proposal.validation
-        }
-      });
-    }
-
-    const validation = validateSkillDefinition({
-      manifest: proposal.manifest,
-      instructions: proposal.instructions,
-      source: "generated"
-    });
-    if (!validation.skill) {
-      const now = new Date().toISOString();
-      const invalid: RunloomSkillProposal = {
-        ...proposal,
-        status: "invalid",
-        updatedAt: now,
-        validation: {
-          ...proposal.validation,
-          valid: false,
-          diagnostics: validation.diagnostics
-        },
-        diagnostics: validation.diagnostics
-      };
-      this.saveSkillProposal(invalid);
-      this.emit("skill.proposal.validation_failed", "runtime", invalid.runId, invalid.sessionId, invalid);
-      throw new RuntimeError(`Skill proposal failed validation: ${proposalId}`, {
-        code: "runtime.skill_proposal_invalid",
-        details: {
-          proposalId,
-          diagnostics: validation.diagnostics
-        }
-      });
-    }
-
-    this.skillProposalStore?.installGeneratedSkill(proposal);
-    const generatedSkill = cloneSkill(validation.skill);
-    this.skills.set(generatedSkill.name, generatedSkill);
-    const now = new Date().toISOString();
-    const installed: RunloomSkillProposal = {
-      ...proposal,
-      skillName: generatedSkill.name,
-      status: "installed",
-      validation: {
-        ...proposal.validation,
-        valid: true,
-        diagnostics: []
-      },
-      approvedAt: proposal.approvedAt ?? now,
-      installedAt: now,
-      updatedAt: now,
-      diagnostics: undefined
-    };
-    this.saveSkillProposal(installed);
-    this.emit("skill.proposal.approved", "runtime", installed.runId, installed.sessionId, installed);
-    this.emit("skill.generated", "runtime", installed.runId, installed.sessionId, {
-      proposalId: installed.id,
-      skill: generatedSkill,
-      persisted: Boolean(this.skillProposalStore),
-      actor
-    });
-    this.emit("skill.installed", "runtime", installed.runId, installed.sessionId, {
-      proposalId: installed.id,
-      skill: generatedSkill,
-      source: "generated",
-      actor
-    });
-    this.recordAudit({
-      action: "skill.generated",
-      actor: actor === "approval" ? "user" : "runtime",
-      runId: installed.runId,
-      sessionId: installed.sessionId,
-      summary: `Generated skill installed: ${generatedSkill.name}.`,
-      details: {
-        proposalId: installed.id,
-        skillName: generatedSkill.name,
-        version: generatedSkill.version,
-        persisted: Boolean(this.skillProposalStore),
-        contentHash: generatedSkill.contentHash
-      }
-    });
-    return cloneSkillProposal(installed);
-  }
-
-  private loadConfiguredSkills(): void {
-    if (!this.options.stateDir) {
-      return;
-    }
-    const loaded = loadSkills({ stateDir: this.options.stateDir });
-    for (const skill of loaded.skills) {
-      this.skills.set(skill.name, cloneSkill(skill));
-    }
-    if (loaded.skills.length > 0 || loaded.diagnostics.length > 0) {
-      this.emit("skills.loaded", "runtime", "skills", "global", {
-        count: loaded.skills.length,
-        enabled: loaded.skills.filter((skill) => skill.enabled).length,
-        disabled: loaded.skills.filter((skill) => !skill.enabled).length,
-        diagnostics: loaded.diagnostics
-      });
-    }
-    for (const diagnostic of loaded.diagnostics) {
-      this.emit("skills.diagnostic", "runtime", "skills", "global", diagnostic);
-    }
   }
 
   private loadConfiguredMcpServers(): void {
@@ -1820,49 +1576,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
     return prompt;
   }
 
-  private selectSkillsForRun(text: string, modelSelection: ModelSelectionResult): {
-    activations: RunloomSkillActivation[];
-    diagnostics: Array<{ skillName: string; reason: string }>;
-  } {
-    return selectSkillActivations({
-      text,
-      taskType: modelSelection.taskType,
-      language: modelSelection.language,
-      availableTools: [...this.tools.keys()],
-      skills: [...this.skills.values()]
-    });
-  }
-
-  private buildSkillContext(activations: RunloomSkillActivation[]): string {
-    if (activations.length === 0) {
-      return "";
-    }
-
-    const lines = ["Activated skills:"];
-    for (const activation of activations) {
-      const skill = this.skills.get(activation.skillName);
-      if (!skill) {
-        continue;
-      }
-      const version = activation.version ? `@${activation.version}` : "";
-      lines.push(`- ${skill.name}${version}: ${skill.description}`);
-      lines.push(`  reason: ${activation.reason}`);
-      if (skill.requiredTools?.length) {
-        lines.push(`  required tools: ${skill.requiredTools.join(", ")}`);
-      }
-      const instructions = truncateForBudget(skill.instructions ?? "", activation.contextBudgetTokens);
-      if (instructions) {
-        lines.push("  instructions:");
-        for (const line of instructions.split(/\r?\n/)) {
-          if (line.trim()) {
-            lines.push(`    ${line}`);
-          }
-        }
-      }
-    }
-    return lines.join("\n");
-  }
-
   private loadRuntimeSnapshot(snapshot?: RuntimeStateSnapshot): void {
     if (!snapshot) {
       return;
@@ -2396,22 +2109,6 @@ function clonePendingModelContinuation(pending: StoredPendingModelContinuation):
   };
 }
 
-function cloneSkill(skill: RunloomSkillSummary): RunloomSkillSummary {
-  return {
-    ...skill,
-    triggers: skill.triggers ? [...skill.triggers] : undefined,
-    requiredTools: skill.requiredTools ? [...skill.requiredTools] : undefined,
-    permissions: skill.permissions ? { ...skill.permissions } : undefined,
-    validation: skill.validation
-      ? {
-          ...skill.validation,
-          tests: skill.validation.tests ? [...skill.validation.tests] : undefined
-        }
-      : undefined,
-    diagnostics: skill.diagnostics ? [...skill.diagnostics] : undefined
-  };
-}
-
 function cloneMcpServer(server: McpServerSummary): McpServerSummary {
   return {
     ...server,
@@ -2886,15 +2583,6 @@ function outputDelta(previous: string, next: string): string {
     return next;
   }
   return next.startsWith(previous) ? next.slice(previous.length) : next;
-}
-
-function truncateForBudget(value: string, budgetTokens: number): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-  const maxChars = Math.max(500, budgetTokens * 4);
-  return trimmed.length > maxChars ? `${trimmed.slice(0, maxChars)}...[truncated]` : trimmed;
 }
 
 function buildSystemPrompt(taskType?: string): string {

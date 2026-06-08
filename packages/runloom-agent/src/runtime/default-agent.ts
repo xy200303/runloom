@@ -9,6 +9,7 @@ import { ApprovalError, ProviderError, RuntimeError, ToolError } from "../errors
 import { RunloomEventBus } from "../events/event-bus.js";
 import { ExternalAgentRuntime } from "../external-agents/runtime.js";
 import { ConfiguredMcpRuntime } from "../mcp/runtime.js";
+import { RunloomMcpServerRuntime } from "../mcp/server-runtime.js";
 import { errorToLogDetails, emitLog } from "../observability/logger.js";
 import { AnthropicMessagesProvider } from "../providers/anthropic-messages-provider.js";
 import { GoogleGeminiProvider } from "../providers/google-gemini-provider.js";
@@ -72,14 +73,7 @@ import type {
   RunloomEditPlan,
   RunloomInput,
   RunloomMessage,
-  RunloomMcpPromptResult,
-  RunloomMcpPromptSummary,
-  RunloomMcpResourceReadResult,
   RunloomMcpServerAdapter,
-  RunloomMcpServerResource,
-  RunloomMcpServerTool,
-  RunloomMcpServerToolCallOptions,
-  RunloomMcpToolCallResult,
   RunloomReviewFindings,
   RunloomRun,
   RunloomSkillProposal,
@@ -133,18 +127,6 @@ interface StoredRun {
 
 type PendingModelContinuation = StoredPendingModelContinuation;
 
-interface NormalizedMcpServerOptions {
-  name: string;
-  readOnly: boolean;
-  exposeRunloomTools: boolean;
-  exposeSkills: boolean;
-  exposeSessions: boolean;
-  exposeMemoryQuery: boolean;
-  exposeAgentService: boolean;
-  allowedToolNames?: string[];
-  deniedToolNames?: string[];
-}
-
 export class DefaultRunloomAgent implements RunloomAgent {
   private readonly workspace: string;
   private readonly bus: RunloomEventBus;
@@ -153,6 +135,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly tools = new Map<string, ToolDefinition>();
   private readonly skillRuntime: SkillRuntime;
   private readonly mcpRuntime: ConfiguredMcpRuntime;
+  private readonly mcpServerRuntime: RunloomMcpServerRuntime;
   private readonly a2aRuntime: A2APeerRuntime;
   private readonly externalAgentRuntime: ExternalAgentRuntime;
   private readonly runs = new Map<string, StoredRun>();
@@ -202,6 +185,19 @@ export class DefaultRunloomAgent implements RunloomAgent {
       stateDir: options.stateDir,
       mcpClient: options.mcpClient,
       tools: this.tools,
+      emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
+      recordAudit: (input) => this.recordAudit(input)
+    });
+    this.mcpServerRuntime = new RunloomMcpServerRuntime({
+      tools: this.tools,
+      createSession: (sessionId) => sessionId ? this.getSession(sessionId) : Promise.resolve(this.store.createSession(this.workspace)),
+      listSkills: () => this.listSkills(),
+      listSkillProposals: () => this.listSkillProposals(),
+      listSessions: () => this.listSessions(),
+      listRuns: (listOptions) => this.listRuns(listOptions),
+      listMessages: (listOptions) => this.listMessages(listOptions),
+      executeTool: (name, input, executeOptions) => this.executeTool(name, input, executeOptions),
+      submit: (input, submitOptions) => this.submit(input, submitOptions),
       emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
       recordAudit: (input) => this.recordAudit(input)
     });
@@ -606,16 +602,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   createMcpServer(options: CreateRunloomMcpServerOptions = {}): RunloomMcpServerAdapter {
-    const config = normalizeMcpServerOptions(options);
-    return {
-      name: config.name,
-      listTools: () => this.listRunloomMcpServerTools(config),
-      callTool: (name, input, callOptions) => this.callRunloomMcpServerTool(config, name, input, callOptions),
-      listResources: () => this.listRunloomMcpServerResources(config),
-      readResource: (uri) => this.readRunloomMcpServerResource(config, uri),
-      listPrompts: () => this.listRunloomMcpServerPrompts(),
-      getPrompt: (name, args) => this.getRunloomMcpServerPrompt(config, name, args)
-    };
+    return this.mcpServerRuntime.createServer(options);
   }
 
   async listApprovals(): Promise<ApprovalRequest[]> {
@@ -1007,176 +994,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
     // Reserved for future persistent stores, providers, MCP connections, and daemon transports.
   }
 
-  private async listRunloomMcpServerTools(config: NormalizedMcpServerOptions): Promise<RunloomMcpServerTool[]> {
-    const tools: RunloomMcpServerTool[] = [];
-    if (config.exposeRunloomTools) {
-      for (const tool of this.tools.values()) {
-        if (shouldExposeRunloomTool(config, tool)) {
-          tools.push({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: cloneJsonObject(tool.inputSchema),
-            permissions: [...tool.permissions],
-            runloomToolName: tool.name
-          });
-        }
-      }
-    }
-    if (config.exposeMemoryQuery && isMcpServerToolNameAllowed(config, "runloom.memory.query")) {
-      tools.push(createMemoryQueryMcpTool());
-    }
-    if (!config.readOnly && config.exposeAgentService && isMcpServerToolNameAllowed(config, "runloom.agent.submit")) {
-      tools.push(createAgentSubmitMcpTool());
-    }
-    return tools.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  private async callRunloomMcpServerTool(
-    config: NormalizedMcpServerOptions,
-    name: string,
-    input: unknown,
-    options: RunloomMcpServerToolCallOptions = {}
-  ): Promise<RunloomMcpToolCallResult> {
-    if (name === "runloom.memory.query" && config.exposeMemoryQuery && isMcpServerToolNameAllowed(config, name)) {
-      return this.callRunloomMcpMemoryQuery(input, options);
-    }
-    if (
-      name === "runloom.agent.submit" &&
-      !config.readOnly &&
-      config.exposeAgentService &&
-      isMcpServerToolNameAllowed(config, name)
-    ) {
-      return this.callRunloomMcpAgentSubmit(input, options);
-    }
-
-    const tool = this.tools.get(name);
-    if (!tool || !config.exposeRunloomTools || !shouldExposeRunloomTool(config, tool)) {
-      throw new ToolError(`MCP server tool not found or not exposed: ${name}`, {
-        code: "tool.not_found",
-        details: {
-          toolName: name,
-          mcpServer: config.name
-        }
-      });
-    }
-
-    const context = await this.createMcpServerCallContext(options);
-    this.emit("mcp.server.tool.call.requested", "mcp", context.runId, context.sessionId, {
-      serverName: config.name,
-      toolName: name,
-      runloomToolName: name
-    });
-    const result = await this.executeTool(name, input, {
-      runId: context.runId,
-      sessionId: context.sessionId,
-      signal: options.signal
-    });
-    this.emit("mcp.server.tool.call.completed", "mcp", result.runId, result.sessionId, {
-      serverName: config.name,
-      toolName: name,
-      runloomToolName: name,
-      status: result.status,
-      approvalId: result.approvalId
-    });
-    this.recordAudit({
-      action: "mcp.server.tool.called",
-      actor: "runtime",
-      runId: result.runId,
-      sessionId: result.sessionId,
-      summary: `MCP server tool called: ${name}.`,
-      details: {
-        serverName: config.name,
-        toolName: name,
-        status: result.status,
-        approvalId: result.approvalId
-      }
-    });
-    return toolExecutionResultToMcpResult(result);
-  }
-
-  private async callRunloomMcpMemoryQuery(
-    input: unknown,
-    options: RunloomMcpServerToolCallOptions
-  ): Promise<RunloomMcpToolCallResult> {
-    const context = await this.createMcpServerCallContext(options);
-    const query = parseMemoryQueryInput(input);
-    const output = {
-      query: query.query,
-      limit: query.limit,
-      records: [],
-      status: "unavailable",
-      message: "Runloom memory stores are not implemented yet."
-    };
-    this.emit("mcp.server.tool.call.requested", "mcp", context.runId, context.sessionId, {
-      serverName: "runloom",
-      toolName: "runloom.memory.query"
-    });
-    this.emit("mcp.server.tool.call.completed", "mcp", context.runId, context.sessionId, {
-      serverName: "runloom",
-      toolName: "runloom.memory.query",
-      status: "completed"
-    });
-    this.recordAudit({
-      action: "mcp.server.tool.called",
-      actor: "runtime",
-      runId: context.runId,
-      sessionId: context.sessionId,
-      summary: "MCP server tool called: runloom.memory.query.",
-      details: {
-        toolName: "runloom.memory.query",
-        status: "completed",
-        query
-      }
-    });
-    return structuredMcpToolResult("runloom.memory.query", context.runId, context.sessionId, "completed", output);
-  }
-
-  private async callRunloomMcpAgentSubmit(
-    input: unknown,
-    options: RunloomMcpServerToolCallOptions
-  ): Promise<RunloomMcpToolCallResult> {
-    const parsed = parseAgentSubmitInput(input);
-    const context = await this.createMcpServerCallContext({
-      ...options,
-      sessionId: options.sessionId ?? parsed.sessionId
-    });
-    this.emit("mcp.server.tool.call.requested", "mcp", context.runId, context.sessionId, {
-      serverName: "runloom",
-      toolName: "runloom.agent.submit"
-    });
-    const result = await this.submit(parsed.input, {
-      sessionId: context.sessionId,
-      signal: options.signal
-    });
-    this.emit("mcp.server.tool.call.completed", "mcp", result.runId, result.sessionId, {
-      serverName: "runloom",
-      toolName: "runloom.agent.submit",
-      status: result.status,
-      approvalId: result.approvalId
-    });
-    this.recordAudit({
-      action: "mcp.server.tool.called",
-      actor: "runtime",
-      runId: result.runId,
-      sessionId: result.sessionId,
-      summary: "MCP server tool called: runloom.agent.submit.",
-      details: {
-        toolName: "runloom.agent.submit",
-        status: result.status,
-        approvalId: result.approvalId
-      }
-    });
-    return runResultToMcpResult("runloom.agent.submit", result);
-  }
-
-  private async createMcpServerCallContext(options: RunloomMcpServerToolCallOptions): Promise<{ runId: string; sessionId: string }> {
-    const session = options.sessionId ? await this.getSession(options.sessionId) : this.store.createSession(this.workspace);
-    return {
-      runId: options.runId ?? `mcpserver_${randomUUID()}`,
-      sessionId: session.id
-    };
-  }
-
   private async collectHostDiagnostics(runId: string, sessionId: string): Promise<RunloomDiagnostic[]> {
     if (!this.options.host?.diagnostics?.getDiagnostics) {
       return [];
@@ -1209,211 +1026,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
       });
       return [];
     }
-  }
-
-  private async listRunloomMcpServerResources(config: NormalizedMcpServerOptions): Promise<RunloomMcpServerResource[]> {
-    const resources: RunloomMcpServerResource[] = [];
-    if (config.exposeSkills) {
-      resources.push({
-        uri: "runloom://skills",
-        name: "Runloom skills",
-        description: "Installed, generated, and registered Runloom skills.",
-        mimeType: "application/json"
-      });
-      resources.push({
-        uri: "runloom://skill-proposals",
-        name: "Runloom skill proposals",
-        description: "Generated skill proposals and approval state.",
-        mimeType: "application/json"
-      });
-      for (const skill of await this.listSkills()) {
-        resources.push({
-          uri: `runloom://skills/${encodeURIComponent(skill.name)}`,
-          name: `Runloom skill: ${skill.name}`,
-          description: skill.description,
-          mimeType: "application/json"
-        });
-      }
-    }
-    if (config.exposeSessions) {
-      resources.push({
-        uri: "runloom://sessions",
-        name: "Runloom sessions",
-        description: "Known Runloom sessions for this workspace.",
-        mimeType: "application/json"
-      });
-      for (const session of await this.listSessions()) {
-        resources.push({
-          uri: `runloom://sessions/${encodeURIComponent(session.id)}/summary`,
-          name: `Runloom session summary: ${session.id}`,
-          description: `Session updated at ${session.updatedAt}.`,
-          mimeType: "application/json"
-        });
-      }
-    }
-    if (config.exposeMemoryQuery) {
-      resources.push({
-        uri: "runloom://memory",
-        name: "Runloom memory query status",
-        description: "Memory query capability status.",
-        mimeType: "application/json"
-      });
-    }
-    return resources.sort((a, b) => a.uri.localeCompare(b.uri));
-  }
-
-  private async readRunloomMcpServerResource(
-    config: NormalizedMcpServerOptions,
-    uri: string
-  ): Promise<RunloomMcpResourceReadResult> {
-    const payload = await this.resolveRunloomMcpServerResource(config, uri);
-    this.emit("mcp.resource.read", "mcp", "mcp", "global", {
-      serverName: config.name,
-      uri
-    });
-    this.recordAudit({
-      action: "mcp.server.resource.read",
-      actor: "runtime",
-      summary: `MCP server resource read: ${uri}.`,
-      details: {
-        serverName: config.name,
-        uri
-      }
-    });
-    return {
-      uri,
-      mimeType: "application/json",
-      text: toJsonText(payload),
-      structuredContent: payload
-    };
-  }
-
-  private async resolveRunloomMcpServerResource(config: NormalizedMcpServerOptions, uri: string): Promise<unknown> {
-    if (uri === "runloom://skills" && config.exposeSkills) {
-      return {
-        skills: await this.listSkills()
-      };
-    }
-    if (uri === "runloom://skill-proposals" && config.exposeSkills) {
-      return {
-        proposals: await this.listSkillProposals()
-      };
-    }
-    if (uri.startsWith("runloom://skills/") && config.exposeSkills) {
-      const skillName = decodeURIComponent(uri.slice("runloom://skills/".length));
-      const skill = (await this.listSkills()).find((item) => item.name === skillName);
-      if (!skill) {
-        throw new RuntimeError(`MCP server skill resource not found: ${skillName}`, {
-          code: "runtime.mcp_resource_not_found",
-          details: { uri, skillName }
-        });
-      }
-      return { skill };
-    }
-    if (uri === "runloom://sessions" && config.exposeSessions) {
-      return {
-        sessions: await this.listSessions()
-      };
-    }
-    if (uri.startsWith("runloom://sessions/") && uri.endsWith("/summary") && config.exposeSessions) {
-      const sessionId = decodeURIComponent(uri.slice("runloom://sessions/".length, -"/summary".length));
-      const session = await this.getSession(sessionId);
-      return {
-        session,
-        runs: await this.listRuns({ sessionId }),
-        messages: await this.listMessages({ sessionId, limit: 20 })
-      };
-    }
-    if (uri === "runloom://memory" && config.exposeMemoryQuery) {
-      return {
-        status: "unavailable",
-        records: [],
-        message: "Runloom memory stores are not implemented yet."
-      };
-    }
-    throw new RuntimeError(`MCP server resource not found or not exposed: ${uri}`, {
-      code: "runtime.mcp_resource_not_found",
-      details: {
-        uri,
-        serverName: config.name
-      }
-    });
-  }
-
-  private async listRunloomMcpServerPrompts(): Promise<RunloomMcpPromptSummary[]> {
-    return [
-      {
-        name: "runloom.code-review",
-        description: "Ask Runloom to perform a findings-first code review.",
-        arguments: [
-          {
-            name: "topic",
-            description: "Optional review focus.",
-            required: false
-          }
-        ]
-      },
-      {
-        name: "runloom.delivery-summary",
-        description: "Ask Runloom to summarize changes, verification, and remaining risks."
-      }
-    ];
-  }
-
-  private async getRunloomMcpServerPrompt(
-    config: NormalizedMcpServerOptions,
-    name: string,
-    args: Record<string, unknown> = {}
-  ): Promise<RunloomMcpPromptResult> {
-    const topic = typeof args.topic === "string" && args.topic.trim() ? ` Focus: ${args.topic.trim()}` : "";
-    let prompt: RunloomMcpPromptResult | undefined;
-    if (name === "runloom.code-review") {
-      prompt = {
-        name,
-        description: "Ask Runloom to perform a findings-first code review.",
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: `Review the current changes using findings-first review mode.${topic}` }]
-          }
-        ]
-      };
-    }
-    if (name === "runloom.delivery-summary") {
-      prompt = {
-        name,
-        description: "Ask Runloom to summarize changes, verification, and remaining risks.",
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: "Summarize modified files, core changes, verification, failures, and remaining risks." }]
-          }
-        ]
-      };
-    }
-    if (!prompt) {
-      throw new RuntimeError(`MCP server prompt not found: ${name}`, {
-        code: "runtime.mcp_prompt_not_found",
-        details: {
-          promptName: name,
-          serverName: config.name
-        }
-      });
-    }
-    this.emit("mcp.prompt.activated", "mcp", "mcp", "global", {
-      serverName: config.name,
-      promptName: name
-    });
-    this.recordAudit({
-      action: "mcp.server.prompt.get",
-      actor: "runtime",
-      summary: `MCP server prompt read: ${name}.`,
-      details: {
-        serverName: config.name,
-        promptName: name
-      }
-    });
-    return prompt;
   }
 
   private loadRuntimeSnapshot(snapshot?: RuntimeStateSnapshot): void {
@@ -1947,195 +1559,6 @@ function clonePendingModelContinuation(pending: StoredPendingModelContinuation):
     pendingToolCall: cloneModelToolCall(pending.pendingToolCall),
     remainingToolCalls: pending.remainingToolCalls.map(cloneModelToolCall)
   };
-}
-
-function normalizeMcpServerOptions(options: CreateRunloomMcpServerOptions): NormalizedMcpServerOptions {
-  const readOnly = options.readOnly ?? true;
-  return {
-    name: options.name?.trim() || "runloom",
-    readOnly,
-    exposeRunloomTools: options.exposeRunloomTools ?? true,
-    exposeSkills: options.exposeSkills ?? true,
-    exposeSessions: options.exposeSessions ?? true,
-    exposeMemoryQuery: options.exposeMemoryQuery ?? true,
-    exposeAgentService: options.exposeAgentService ?? !readOnly,
-    allowedToolNames: options.allowedToolNames ? [...options.allowedToolNames] : undefined,
-    deniedToolNames: options.deniedToolNames ? [...options.deniedToolNames] : undefined
-  };
-}
-
-function shouldExposeRunloomTool(config: NormalizedMcpServerOptions, tool: ToolDefinition): boolean {
-  if (!isMcpServerToolNameAllowed(config, tool.name)) {
-    return false;
-  }
-  if (!config.readOnly) {
-    return true;
-  }
-  return tool.permissions.every((scope) => scope === "filesystem.read");
-}
-
-function isMcpServerToolNameAllowed(config: NormalizedMcpServerOptions, name: string): boolean {
-  if (config.deniedToolNames?.includes(name)) {
-    return false;
-  }
-  if (config.allowedToolNames?.length && !config.allowedToolNames.includes(name)) {
-    return false;
-  }
-  return true;
-}
-
-function createMemoryQueryMcpTool(): RunloomMcpServerTool {
-  return {
-    name: "runloom.memory.query",
-    description: "Query Runloom memory records. Returns an empty unavailable result until memory stores are implemented.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-        limit: { type: "number" }
-      },
-      additionalProperties: false
-    },
-    permissions: ["filesystem.read"]
-  };
-}
-
-function createAgentSubmitMcpTool(): RunloomMcpServerTool {
-  return {
-    name: "runloom.agent.submit",
-    description: "Submit a task to the Runloom agent service.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        text: { type: "string" },
-        model: { type: "string" },
-        profile: { type: "string" },
-        taskType: { type: "string" },
-        language: { type: "string" },
-        sessionId: { type: "string" }
-      },
-      required: ["text"],
-      additionalProperties: false
-    },
-    permissions: ["external_agents"]
-  };
-}
-
-function toolExecutionResultToMcpResult(result: ToolExecutionResult): RunloomMcpToolCallResult {
-  const structuredContent =
-    result.status === "completed"
-      ? result.output
-      : {
-          status: result.status,
-          error: result.error,
-          approvalId: result.approvalId
-        };
-  return {
-    toolName: result.toolName,
-    runId: result.runId,
-    sessionId: result.sessionId,
-    status: result.status,
-    structuredContent,
-    approvalId: result.approvalId,
-    durationMs: result.durationMs,
-    isError: result.status === "failed",
-    content: [
-      {
-        type: "text",
-        mimeType: "application/json",
-        text: stringifyToolResult(result)
-      }
-    ]
-  };
-}
-
-function runResultToMcpResult(toolName: string, result: RunResult): RunloomMcpToolCallResult {
-  const structuredContent = {
-    status: result.status,
-    outputText: result.outputText,
-    approvalId: result.approvalId
-  };
-  return {
-    toolName,
-    runId: result.runId,
-    sessionId: result.sessionId,
-    status: result.status,
-    structuredContent,
-    approvalId: result.approvalId,
-    isError: result.status === "failed" || result.status === "cancelled",
-    content: [
-      {
-        type: "text",
-        mimeType: "application/json",
-        text: toJsonText(structuredContent)
-      }
-    ]
-  };
-}
-
-function structuredMcpToolResult(
-  toolName: string,
-  runId: string,
-  sessionId: string,
-  status: RunloomMcpToolCallResult["status"],
-  output: unknown
-): RunloomMcpToolCallResult {
-  return {
-    toolName,
-    runId,
-    sessionId,
-    status,
-    structuredContent: output,
-    content: [
-      {
-        type: "text",
-        mimeType: "application/json",
-        text: toJsonText(output)
-      }
-    ]
-  };
-}
-
-function parseMemoryQueryInput(input: unknown): { query?: string; limit?: number } {
-  if (!isRecord(input)) {
-    return {};
-  }
-  return {
-    query: typeof input.query === "string" ? input.query : undefined,
-    limit: typeof input.limit === "number" && Number.isFinite(input.limit) ? input.limit : undefined
-  };
-}
-
-function parseAgentSubmitInput(input: unknown): { input: RunloomInput; sessionId?: string } {
-  if (!isRecord(input) || typeof input.text !== "string" || !input.text.trim()) {
-    throw new RuntimeError("MCP agent submit input requires a non-empty text field.", {
-      code: "runtime.invalid_mcp_agent_submit_input",
-      details: { input }
-    });
-  }
-  return {
-    input: {
-      text: input.text,
-      model: typeof input.model === "string" ? input.model : undefined,
-      profile: typeof input.profile === "string" ? input.profile : undefined,
-      taskType: typeof input.taskType === "string" ? input.taskType : undefined,
-      language: typeof input.language === "string" ? input.language : undefined
-    },
-    sessionId: typeof input.sessionId === "string" ? input.sessionId : undefined
-  };
-}
-
-function cloneJsonObject(value: Record<string, unknown>): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
-}
-
-function toJsonText(value: unknown): string {
-  const json = JSON.stringify(value, null, 2);
-  return json.length > 120_000 ? `${json.slice(0, 120_000)}...[truncated]` : json;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cloneModelInputItem(item: RunloomModelInputItem): RunloomModelInputItem {

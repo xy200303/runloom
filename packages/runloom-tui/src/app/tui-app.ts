@@ -20,6 +20,7 @@ import {
   parseScrollAmount,
   parseVerificationCommand
 } from "./command-parsers.js";
+import { TuiModelCommandController } from "./model-commands.js";
 import {
   DEFAULT_PANEL_LINES,
   FOCUS_PANELS,
@@ -37,7 +38,6 @@ import {
 } from "./view-model.js";
 import {
   formatA2APeers,
-  formatActiveModelState,
   formatActivityCommandHelp,
   formatActivityDetail,
   formatActivityView,
@@ -53,7 +53,6 @@ import {
   formatFocusCommandHelp,
   formatGitStatus,
   formatMcpServers,
-  formatModelCommandHelp,
   formatModelSelection,
   formatReviewFindings,
   formatScrollCommandHelp,
@@ -96,14 +95,11 @@ export function createRunloomTuiApp(options: CreateRunloomTuiAppOptions): Runloo
 class BasicRunloomTuiApp implements RunloomTuiApp {
   private unsubscribe?: Unsubscribe;
   private stopped = false;
-  private activeModel?: string;
-  private activeProfile?: string;
-  private activeTaskType?: string;
-  private activeLanguage?: string;
   private activeRunId?: string;
   private activeSessionId?: string;
   private assistantBuffer = "";
   private readonly approvalCommands: TuiApprovalCommandController;
+  private readonly modelCommands: TuiModelCommandController;
   private readonly viewState: TuiViewState = {
     transcript: [],
     activity: [],
@@ -119,6 +115,9 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   constructor(private readonly options: CreateRunloomTuiAppOptions) {
     this.approvalCommands = new TuiApprovalCommandController({
       agent: options.agent,
+      output: options.output ?? defaultOutput
+    });
+    this.modelCommands = new TuiModelCommandController({
       output: options.output ?? defaultOutput
     });
   }
@@ -173,10 +172,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
   async submitPrompt(prompt: string): Promise<void> {
     await this.options.agent.submit({
       text: prompt,
-      model: this.activeModel,
-      profile: this.activeProfile,
-      taskType: this.activeTaskType,
-      language: this.activeLanguage
+      ...this.modelCommands.submitOptions()
     }, {
       sessionId: this.activeSessionId
     });
@@ -317,14 +313,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
 
     if (command === "/status") {
       const policy = await this.options.agent.getApprovalPolicy();
-      output.write(formatStatusView(this.viewState, {
-        activeSessionId: this.activeSessionId,
-        activeRunId: this.activeRunId,
-        activeModel: this.activeModel,
-        activeProfile: this.activeProfile,
-        activeTaskType: this.activeTaskType,
-        activeLanguage: this.activeLanguage
-      }));
+      output.write(formatStatusView(this.viewState, this.viewContext()));
       output.write(formatApprovalPolicy(policy));
       return;
     }
@@ -355,14 +344,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/view") {
-      output.write(formatCompositeView(this.viewState, {
-        activeSessionId: this.activeSessionId,
-        activeRunId: this.activeRunId,
-        activeModel: this.activeModel,
-        activeProfile: this.activeProfile,
-        activeTaskType: this.activeTaskType,
-        activeLanguage: this.activeLanguage
-      }));
+      output.write(formatCompositeView(this.viewState, this.viewContext()));
       return;
     }
 
@@ -414,7 +396,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command === "/review" || command === "/review on" || command === "/review off") {
-      this.handleReviewCommand(command);
+      this.modelCommands.handleReviewCommand(command);
       return;
     }
 
@@ -464,7 +446,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     }
 
     if (command.startsWith("/model")) {
-      this.handleModelCommand(command);
+      this.modelCommands.handleModelCommand(command);
       return;
     }
 
@@ -547,32 +529,12 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
       const events = await this.rebuildFromStoredEvents(session.id);
       output.write(`Session switched to ${session.id}\n`);
       output.write(`[replay] loaded ${events.length} event(s)\n`);
-      output.write(formatCompositeView(this.viewState, {
-        activeSessionId: this.activeSessionId,
-        activeRunId: this.activeRunId,
-        activeModel: this.activeModel,
-        activeProfile: this.activeProfile,
-        activeTaskType: this.activeTaskType,
-        activeLanguage: this.activeLanguage
-      }));
+      output.write(formatCompositeView(this.viewState, this.viewContext()));
       return;
     }
 
     output.write(`Unknown /session action: ${action}\n`);
     output.write(formatSessionCommandHelp());
-  }
-
-  private handleReviewCommand(command: string): void {
-    const output = this.options.output ?? defaultOutput;
-    if (command === "/review off") {
-      if (this.activeTaskType === "code_review") {
-        this.activeTaskType = undefined;
-      }
-      output.write("Review mode disabled\n");
-      return;
-    }
-    this.activeTaskType = "code_review";
-    output.write("Review mode enabled\n");
   }
 
   private async handleStopCommand(): Promise<void> {
@@ -609,14 +571,7 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     const output = this.options.output ?? defaultOutput;
     const events = await this.rebuildFromStoredEvents(this.activeSessionId);
     output.write(`[replay] loaded ${events.length} event(s)\n`);
-    output.write(formatCompositeView(this.viewState, {
-      activeSessionId: this.activeSessionId,
-      activeRunId: this.activeRunId,
-      activeModel: this.activeModel,
-      activeProfile: this.activeProfile,
-      activeTaskType: this.activeTaskType,
-      activeLanguage: this.activeLanguage
-    }));
+    output.write(formatCompositeView(this.viewState, this.viewContext()));
   }
 
   private async handlePanelCommand(panel: TuiPanel, command: string): Promise<void> {
@@ -959,72 +914,13 @@ class BasicRunloomTuiApp implements RunloomTuiApp {
     return {
       activeSessionId: this.activeSessionId,
       activeRunId: this.activeRunId,
-      activeModel: this.activeModel,
-      activeProfile: this.activeProfile,
-      activeTaskType: this.activeTaskType,
-      activeLanguage: this.activeLanguage
+      ...this.modelCommands.viewContext()
     };
   }
 
   private trackToolSession(result: ToolExecutionResult): void {
     this.activeRunId = result.runId;
     this.activeSessionId = result.sessionId;
-  }
-
-  private handleModelCommand(command: string): void {
-    const output = this.options.output ?? defaultOutput;
-    const [, action, ...rest] = command.split(/\s+/);
-    const value = rest.join(" ").trim();
-
-    if (!action) {
-      output.write(formatActiveModelState(this.activeModel, this.activeProfile, this.activeTaskType, this.activeLanguage));
-      output.write(formatModelCommandHelp());
-      return;
-    }
-
-    if (action === "clear") {
-      this.activeModel = undefined;
-      this.activeProfile = undefined;
-      this.activeTaskType = undefined;
-      this.activeLanguage = undefined;
-      output.write("Model overrides cleared\n");
-      return;
-    }
-
-    if (!value) {
-      output.write(`Missing value for /model ${action}\n`);
-      output.write(formatModelCommandHelp());
-      return;
-    }
-
-    if (action === "set") {
-      this.activeModel = value;
-      this.activeProfile = undefined;
-      output.write(`Model override set to ${value}\n`);
-      return;
-    }
-
-    if (action === "profile") {
-      this.activeProfile = value;
-      this.activeModel = undefined;
-      output.write(`Model profile set to ${value}\n`);
-      return;
-    }
-
-    if (action === "task") {
-      this.activeTaskType = value;
-      output.write(`Model task type set to ${value}\n`);
-      return;
-    }
-
-    if (action === "language") {
-      this.activeLanguage = value;
-      output.write(`Model language set to ${value}\n`);
-      return;
-    }
-
-    output.write(`Unknown /model action: ${action}\n`);
-    output.write(formatModelCommandHelp());
   }
 
   private async rebuildFromStoredEvents(sessionId?: string): Promise<RunloomEvent[]> {

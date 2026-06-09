@@ -19,12 +19,9 @@ import { SkillRuntime } from "../skills/runtime.js";
 import { createBuiltInCodingTools } from "../tools/coding-tools.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import {
-  RunArtifactRecorder,
-  cloneDeliverySummary,
-  cloneDiffRecord,
-  cloneEditPlan,
-  cloneReviewFindings
+  RunArtifactRecorder
 } from "./run-artifacts.js";
+import { RunQueryRuntime } from "./run-queries.js";
 import type {
   RuntimeStateSnapshot,
   StoredModelToolCall,
@@ -138,6 +135,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly config: RunloomConfig;
   private readonly toolExecutor: ToolExecutor;
   private readonly artifactRecorder: RunArtifactRecorder;
+  private readonly queryRuntime: RunQueryRuntime;
   private readonly activeRuns = new Map<string, { sessionId: string; controller: AbortController }>();
   private approvalPolicy: ApprovalPolicyConfig;
   private sequence = 0;
@@ -179,6 +177,12 @@ export class DefaultRunloomAgent implements RunloomAgent {
       appendReviewFindings: (findings) => this.store.appendReviewFindings(findings),
       emit: (type, source, runId, sessionId, payload) => this.emit(type, source, runId, sessionId, payload),
       log: (input) => this.log(input)
+    });
+    this.queryRuntime = new RunQueryRuntime({
+      workspace: this.workspace,
+      store: this.store,
+      bus: this.bus,
+      runs: this.runs
     });
     this.skillRuntime = new SkillRuntime({
       stateDir: options.stateDir,
@@ -504,7 +508,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async listSessions(): Promise<RunloomSession[]> {
-    return this.store.listSessions(this.workspace);
+    return this.queryRuntime.listSessions();
   }
 
   async listTools(): Promise<ToolSummary[]> {
@@ -587,85 +591,43 @@ export class DefaultRunloomAgent implements RunloomAgent {
   }
 
   async listAuditRecords(options: ListAuditRecordsOptions = {}): Promise<RunloomAuditRecord[]> {
-    const records = this.store.listAuditRecords(options.action);
-    return takeLast(records, options.limit).map((record) => ({ ...record }));
+    return this.queryRuntime.listAuditRecords(options);
   }
 
   async getSession(sessionId: string): Promise<RunloomSession> {
-    const session = this.store.getSession(sessionId);
-    if (!session) {
-      throw new RuntimeError(`Session not found: ${sessionId}`, {
-        code: "runtime.session_not_found",
-        details: { sessionId }
-      });
-    }
-    return session;
+    return this.queryRuntime.getSession(sessionId);
   }
 
   async listRuns(options: ListRunsOptions = {}): Promise<RunloomRun[]> {
-    return [...this.runs.values()]
-      .map((storedRun) => cloneRun(storedRun.run))
-      .filter((run) => !options.sessionId || run.sessionId === options.sessionId)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return this.queryRuntime.listRuns(options);
   }
 
   async getRun(runId: string): Promise<RunloomRun> {
-    const storedRun = this.runs.get(runId);
-    if (!storedRun) {
-      throw new RuntimeError(`Run not found: ${runId}`, {
-        code: "runtime.run_not_found",
-        details: { runId }
-      });
-    }
-    return cloneRun(storedRun.run);
+    return this.queryRuntime.getRun(runId);
   }
 
   async listEvents(options: ListEventsOptions = {}): Promise<RunloomEvent[]> {
-    const events = this.bus
-      .listEvents(options.sessionId)
-      .filter((event) => !options.runId || event.runId === options.runId);
-    return takeLast(events, options.limit).map((event) => ({ ...event }));
+    return this.queryRuntime.listEvents(options);
   }
 
   async listMessages(options: ListMessagesOptions = {}): Promise<RunloomMessage[]> {
-    const messages = this.store.listMessages({
-      sessionId: options.sessionId,
-      runId: options.runId
-    });
-    return takeLast(messages, options.limit).map(cloneMessage);
+    return this.queryRuntime.listMessages(options);
   }
 
   async listEditPlans(options: ListEditPlansOptions = {}): Promise<RunloomEditPlan[]> {
-    const plans = this.store.listEditPlans({
-      sessionId: options.sessionId,
-      runId: options.runId,
-      status: options.status
-    });
-    return takeLast(plans, options.limit).map(cloneEditPlan);
+    return this.queryRuntime.listEditPlans(options);
   }
 
   async listDeliverySummaries(options: ListDeliverySummariesOptions = {}): Promise<RunloomDeliverySummary[]> {
-    const summaries = this.store.listDeliverySummaries({
-      sessionId: options.sessionId,
-      runId: options.runId
-    });
-    return takeLast(summaries, options.limit).map(cloneDeliverySummary);
+    return this.queryRuntime.listDeliverySummaries(options);
   }
 
   async listReviewFindings(options: ListReviewFindingsOptions = {}): Promise<RunloomReviewFindings[]> {
-    const findings = this.store.listReviewFindings({
-      sessionId: options.sessionId,
-      runId: options.runId
-    });
-    return takeLast(findings, options.limit).map(cloneReviewFindings);
+    return this.queryRuntime.listReviewFindings(options);
   }
 
   async listDiffRecords(options: ListDiffRecordsOptions = {}): Promise<RunloomDiffRecord[]> {
-    const records = this.store.listDiffRecords({
-      sessionId: options.sessionId,
-      runId: options.runId
-    });
-    return takeLast(records, options.limit).map(cloneDiffRecord);
+    return this.queryRuntime.listDiffRecords(options);
   }
 
   async resume(runId: string): Promise<RunResult> {
@@ -1453,28 +1415,10 @@ function cloneModelToolCall(toolCall: StoredModelToolCall): StoredModelToolCall 
   };
 }
 
-function cloneMessage(message: RunloomMessage): RunloomMessage {
-  return {
-    ...message,
-    content: message.content.map((part) => ({ ...part })),
-    metadata: message.metadata ? { ...message.metadata } : undefined
-  };
-}
-
 function cloneDiagnostic(diagnostic: RunloomDiagnostic): RunloomDiagnostic {
   return {
     ...diagnostic
   };
-}
-
-function takeLast<TItem>(items: TItem[], limit?: number): TItem[] {
-  if (typeof limit !== "number" || limit < 0) {
-    return items;
-  }
-  if (limit === 0) {
-    return [];
-  }
-  return items.slice(-limit);
 }
 
 function stringifyToolResult(result: ToolExecutionResult): string {

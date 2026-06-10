@@ -22,12 +22,11 @@ import {
   RunArtifactRecorder
 } from "./run-artifacts.js";
 import { RunQueryRuntime } from "./run-queries.js";
+import { RuntimeStateManager } from "./runtime-state.js";
 import type {
-  RuntimeStateSnapshot,
-  StoredModelToolCall,
-  StoredPendingModelContinuation,
-  StoredRunRecord
-} from "../sessions/file-runtime-state-store.js";
+  PendingModelContinuation,
+  RuntimeRunRecord
+} from "./runtime-state.js";
 import type {
   ApprovalDecision,
   ApprovalPolicyConfig,
@@ -110,13 +109,6 @@ interface NormalizedSubmitInput {
   language?: string;
 }
 
-interface StoredRun {
-  run: RunloomRun;
-  input: NormalizedSubmitInput;
-}
-
-type PendingModelContinuation = StoredPendingModelContinuation;
-
 export class DefaultRunloomAgent implements RunloomAgent {
   private readonly workspace: string;
   private readonly bus: RunloomEventBus;
@@ -128,7 +120,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly mcpServerRuntime: RunloomMcpServerRuntime;
   private readonly a2aRuntime: A2APeerRuntime;
   private readonly externalAgentRuntime: ExternalAgentRuntime;
-  private readonly runs = new Map<string, StoredRun>();
+  private readonly runs = new Map<string, RuntimeRunRecord>();
   private readonly pendingModelContinuations = new Map<string, PendingModelContinuation>();
   private readonly runtimeStateStore?: FileRuntimeStateStore;
   private readonly approvalPolicyStore?: FileApprovalPolicyStore;
@@ -136,6 +128,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
   private readonly toolExecutor: ToolExecutor;
   private readonly artifactRecorder: RunArtifactRecorder;
   private readonly queryRuntime: RunQueryRuntime;
+  private readonly stateManager: RuntimeStateManager;
   private readonly activeRuns = new Map<string, { sessionId: string; controller: AbortController }>();
   private approvalPolicy: ApprovalPolicyConfig;
   private sequence = 0;
@@ -147,7 +140,14 @@ export class DefaultRunloomAgent implements RunloomAgent {
     this.sequence = runtimeSnapshot?.sequence ?? 0;
     this.store = new InMemorySessionStore(runtimeSnapshot?.store, () => this.saveRuntimeState());
     this.bus = new RunloomEventBus(runtimeSnapshot?.events, () => this.saveRuntimeState());
-    this.loadRuntimeSnapshot(runtimeSnapshot);
+    this.stateManager = new RuntimeStateManager({
+      store: this.store,
+      bus: this.bus,
+      runs: this.runs,
+      pendingModelContinuations: this.pendingModelContinuations,
+      runtimeStateStore: this.runtimeStateStore
+    });
+    this.stateManager.loadSnapshot(runtimeSnapshot);
     this.approvalPolicyStore = options.stateDir ? new FileApprovalPolicyStore(options.stateDir, this.workspace) : undefined;
     this.approvalPolicy = this.loadInitialApprovalPolicy(options.approvalPolicy);
     this.config = loadRunloomConfig({
@@ -665,7 +665,7 @@ export class DefaultRunloomAgent implements RunloomAgent {
     );
   }
 
-  private async resumeWaitingApprovalRun(storedRun: StoredRun, approvalId: string): Promise<RunResult> {
+  private async resumeWaitingApprovalRun(storedRun: RuntimeRunRecord, approvalId: string): Promise<RunResult> {
     const pending = this.pendingModelContinuations.get(approvalId);
     const decision = this.store.getApprovalDecision(approvalId);
     if (!decision) {
@@ -965,29 +965,8 @@ export class DefaultRunloomAgent implements RunloomAgent {
     }
   }
 
-  private loadRuntimeSnapshot(snapshot?: RuntimeStateSnapshot): void {
-    if (!snapshot) {
-      return;
-    }
-    for (const storedRun of snapshot.runs) {
-      this.runs.set(storedRun.run.id, {
-        run: cloneRun(storedRun.run),
-        input: { ...storedRun.input }
-      });
-    }
-    for (const pending of snapshot.pendingModelContinuations) {
-      this.pendingModelContinuations.set(pending.approvalId, clonePendingModelContinuation(pending));
-    }
-  }
-
   private saveRuntimeState(): void {
-    this.runtimeStateStore?.save({
-      store: this.store.snapshot(),
-      runs: [...this.runs.values()].map(cloneStoredRun),
-      events: this.bus.snapshot(),
-      sequence: this.sequence,
-      pendingModelContinuations: [...this.pendingModelContinuations.values()].map(clonePendingModelContinuation)
-    });
+    this.stateManager.saveSnapshot(this.sequence);
   }
 
   private async runModel(
@@ -1358,61 +1337,6 @@ export class DefaultRunloomAgent implements RunloomAgent {
     });
     this.saveRuntimeState();
   }
-}
-
-function cloneRun(run: RunloomRun): RunloomRun {
-  return {
-    ...run
-  };
-}
-
-function cloneStoredRun(storedRun: StoredRun): StoredRunRecord {
-  return {
-    run: cloneRun(storedRun.run),
-    input: { ...storedRun.input }
-  };
-}
-
-function clonePendingModelContinuation(pending: StoredPendingModelContinuation): StoredPendingModelContinuation {
-  return {
-    ...pending,
-    modelSelection: { ...pending.modelSelection },
-    input: pending.input.map(cloneModelInputItem),
-    tools: pending.tools.map(cloneModelTool),
-    output: [...pending.output],
-    pendingToolCall: cloneModelToolCall(pending.pendingToolCall),
-    remainingToolCalls: pending.remainingToolCalls.map(cloneModelToolCall)
-  };
-}
-
-function cloneModelInputItem(item: RunloomModelInputItem): RunloomModelInputItem {
-  if (item.type === "message") {
-    return {
-      ...item,
-      content: item.content.map((part) => ({ ...part }))
-    };
-  }
-  if (item.type === "function_call") {
-    return {
-      ...item
-    };
-  }
-  return {
-    ...item
-  };
-}
-
-function cloneModelTool(tool: RunloomModelTool): RunloomModelTool {
-  return {
-    ...tool,
-    inputSchema: { ...tool.inputSchema }
-  };
-}
-
-function cloneModelToolCall(toolCall: StoredModelToolCall): StoredModelToolCall {
-  return {
-    ...toolCall
-  };
 }
 
 function cloneDiagnostic(diagnostic: RunloomDiagnostic): RunloomDiagnostic {
